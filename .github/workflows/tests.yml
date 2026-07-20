@@ -71,7 +71,7 @@ jobs:
         run: uv run poe build
       - name: 检查发行包元数据
         run: uv run poe package-check
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: python-distributions
           path: dist/*
