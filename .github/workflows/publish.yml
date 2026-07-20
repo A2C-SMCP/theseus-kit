@@ -1,0 +1,90 @@
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: 校验并构建发行包
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: 安装锁定依赖
+        run: uv sync --locked --all-groups
+      - name: 校验 Release Tag 与项目版本
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          IS_PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          if [ "$IS_PRERELEASE" = "true" ]; then release_type=prerelease; else release_type=final; fi
+          uv run python scripts/check_release.py --tag "$RELEASE_TAG" --release-type "$release_type"
+      - name: 正式版必须来自 main
+        if: ${{ github.event.release.prerelease == false }}
+        run: |
+          git fetch origin main --depth=1
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - name: 运行质量门禁与测试
+        run: uv run poe ci
+      - name: 构建并检查发行包
+        run: uv run poe build && uv run poe package-check
+      - name: 校验 Wheel 内版本
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          IS_PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          if [ "$IS_PRERELEASE" = "true" ]; then release_type=prerelease; else release_type=final; fi
+          uv run python scripts/check_release.py --tag "$RELEASE_TAG" --release-type "$release_type" --wheel "$(find dist -name '*.whl' -print -quit)"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: python-distributions
+          path: dist/*
+          if-no-files-found: error
+
+  publish-testpypi:
+    name: 发布预发行版到 TestPyPI
+    needs: build
+    if: ${{ github.event.release.prerelease == true }}
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/theseus-kit/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: python-distributions
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  publish-pypi:
+    name: 发布正式版到 PyPI
+    needs: build
+    if: ${{ github.event.release.prerelease == false }}
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/theseus-kit/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: python-distributions
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1

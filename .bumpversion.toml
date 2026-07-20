@@ -1,0 +1,56 @@
+[tool.bumpversion]
+current_version = "0.1.0.dev0"
+parse = """(?x)
+    ^
+    (?P<major>0|[1-9]\\d*)\\.
+    (?P<minor>0|[1-9]\\d*)\\.
+    (?P<patch>0|[1-9]\\d*)
+    (?:(?P<pre_l>a|b|rc)(?P<pre_n>0|[1-9]\\d*))?
+    (?:(?P<dev>\\.dev)(?P<dev_n>0|[1-9]\\d*))?
+    (?:(?P<post>\\.post)(?P<post_n>0|[1-9]\\d*))?
+    $
+"""
+serialize = [
+    "{major}.{minor}.{patch}{pre_l}{pre_n}",
+    "{major}.{minor}.{patch}{dev}{dev_n}",
+    "{major}.{minor}.{patch}{post}{post_n}",
+    "{major}.{minor}.{patch}",
+]
+tag = true
+sign_tags = false
+tag_name = "v{new_version}"
+tag_message = "Bump version: {current_version} -> {new_version}"
+allow_dirty = false
+commit = true
+message = "Bump version: {current_version} -> {new_version}"
+
+[tool.bumpversion.parts.pre_l]
+values = ["a", "b", "rc", ""]
+optional_value = ""
+
+[tool.bumpversion.parts.pre_n]
+first_value = 1
+optional_value = ""
+
+[tool.bumpversion.parts.dev]
+values = [".dev"]
+
+[tool.bumpversion.parts.dev_n]
+first_value = 0
+
+[tool.bumpversion.parts.post]
+values = [".post"]
+
+[tool.bumpversion.parts.post_n]
+first_value = 1
+
+[[tool.bumpversion.files]]
+filename = "src/theseus_kit/__init__.py"
+search = '__version__ = "{current_version}"'
+replace = '__version__ = "{new_version}"'
+
+[[tool.bumpversion.files]]
+filename = "pyproject.toml"
+search = 'version = "{current_version}"'
+replace = 'version = "{new_version}"'
+

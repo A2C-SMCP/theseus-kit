@@ -1,0 +1,78 @@
+name: Tests
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: 质量检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: 安装锁定依赖
+        run: uv sync --locked --all-groups
+      - name: 检查锁文件、格式、Lint 与类型
+        run: uv run poe lock-check && uv run poe check
+
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: 安装锁定依赖
+        run: uv sync --locked --all-groups --python "${{ matrix.python-version }}"
+      - name: 运行测试
+        run: |
+          uv run --python "${{ matrix.python-version }}" python -c "import platform; print(platform.python_version())"
+          uv run --python "${{ matrix.python-version }}" python -m pytest
+
+  package:
+    name: 构建并检查发行包
+    needs: [quality, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: 安装锁定依赖
+        run: uv sync --locked --all-groups
+      - name: 构建 Wheel 与 sdist
+        run: uv run poe build
+      - name: 检查发行包元数据
+        run: uv run poe package-check
+      - uses: actions/upload-artifact@v5
+        with:
+          name: python-distributions
+          path: dist/*
+          if-no-files-found: error

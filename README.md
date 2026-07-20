@@ -31,16 +31,20 @@ tracked as a blocking 0.1.0 design issue for maintainer approval.
 Requirements: Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-uv sync
+uv sync --locked --all-groups
 uv run theseus-kit
 ```
 
 Quality checks:
 
 ```bash
-uv run poe check
-uv run poe test
+uv run poe ci
+uv run poe build
+uv run poe package-check
 ```
+
+常用任务可通过 `uv run poe --help` 查看。版本更新和 PyPI/TestPyPI
+Trusted Publishing 流程见 [发布文档](docs/releasing.md)。
 
 The executable currently starts an empty MCP server over stdio. Tools and
 resources will land incrementally under the 0.1.0 milestone.
@@ -53,4 +57,3 @@ resources will land incrementally under the 0.1.0 milestone.
 ## License
 
 MIT
-

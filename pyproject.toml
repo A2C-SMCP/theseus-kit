@@ -40,23 +40,57 @@ dev = [
     "pytest>=8.4.0,<9.0.0",
     "ruff>=0.12.0,<1.0.0",
 ]
+test = [
+    "pytest-cov>=6.2.0,<8.0.0",
+]
+build = [
+    "bump-my-version>=1.2.0,<2.0.0",
+    "packaging>=25.0,<27.0",
+    "twine>=6.2.0,<7.0.0",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/theseus_kit"]
 
+[tool.hatch.build.targets.sdist]
+exclude = ["/.gitignore"]
+include = [
+    "/src",
+    "/tests",
+    "/docs",
+    "/README.md",
+    "/CONTRIBUTING.md",
+    "/CHANGELOG.md",
+    "/LICENSE",
+    "/pyproject.toml",
+]
+
 [tool.poe.tasks]
-format = "ruff format src tests"
-format-check = "ruff format --check src tests"
-lint = "ruff check src tests"
-typecheck = "mypy src"
+format = "ruff format src tests scripts"
+format-check = "ruff format --check src tests scripts"
+lint = "ruff check src tests scripts"
+typecheck = "mypy src scripts"
 test = "pytest"
+test-cov = "pytest --cov=theseus_kit --cov-report=term-missing --cov-report=xml --cov-fail-under=80"
+lock-check = "uv lock --check"
+build = "uv build"
+package-check = "twine check dist/*.whl dist/*.tar.gz"
+version-show = "bump-my-version show current_version"
 
 [tool.poe.tasks.check]
 sequence = ["format-check", "lint", "typecheck"]
 
+[tool.poe.tasks.ci]
+sequence = ["lock-check", "check", "test-cov"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 addopts = ["--strict-markers", "--tb=short"]
+
+[tool.coverage.run]
+source = ["theseus_kit"]
+omit = ["src/theseus_kit/__main__.py"]
 
 [tool.ruff]
 line-length = 120
@@ -69,8 +103,8 @@ select = ["E", "F", "I", "B", "UP"]
 python_version = "3.11"
 strict = true
 pretty = true
+files = ["src", "scripts"]
 
 [[tool.mypy.overrides]]
 module = ["mcp.*"]
 ignore_missing_imports = true
-

@@ -10,4 +10,4 @@ dist/
 build/
 htmlcov/
 .coverage
-
+coverage.xml
