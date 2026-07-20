@@ -1,0 +1,76 @@
+[project]
+name = "theseus-kit"
+version = "0.1.0.dev0"
+description = "MCP server for safely inspecting, editing, templating, and publishing TFRobot configurations"
+readme = "README.md"
+requires-python = ">=3.11,<4.0"
+license = { text = "MIT" }
+authors = [{ name = "A2C-SMCP contributors" }]
+keywords = ["mcp", "a2c-smcp", "agent", "configuration"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "httpx>=0.28.0,<1.0.0",
+    "mcp>=1.15.0,<2.0.0",
+    "pydantic>=2.11.0,<3.0.0",
+    "pydantic-settings>=2.10.0,<3.0.0",
+]
+
+[project.urls]
+Repository = "https://github.com/A2C-SMCP/theseus-kit"
+Issues = "https://github.com/A2C-SMCP/theseus-kit/issues"
+
+[project.scripts]
+theseus-kit = "theseus_kit.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.17.0,<2.0.0",
+    "poethepoet>=0.37.0,<1.0.0",
+    "pytest>=8.4.0,<9.0.0",
+    "ruff>=0.12.0,<1.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/theseus_kit"]
+
+[tool.poe.tasks]
+format = "ruff format src tests"
+format-check = "ruff format --check src tests"
+lint = "ruff check src tests"
+typecheck = "mypy src"
+test = "pytest"
+
+[tool.poe.tasks.check]
+sequence = ["format-check", "lint", "typecheck"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--strict-markers", "--tb=short"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+pretty = true
+
+[[tool.mypy.overrides]]
+module = ["mcp.*"]
+ignore_missing_imports = true
+
