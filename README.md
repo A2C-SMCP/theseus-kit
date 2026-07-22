@@ -22,9 +22,11 @@ any MCP-capable client, and exposes optional A2C-SMCP-compatible `window://` and
 - Reuse the robot's `/llms.txt` and `/v1/factory/llm-docs/**` documentation as
   the source of truth for version-specific configuration guidance.
 
-The progressive-disclosure contract for large configurations is intentionally
-not frozen in this scaffold. Its alternatives and acceptance criteria are
-tracked as a blocking 0.1.0 design issue for maintainer approval.
+The progressive-disclosure contract for large configurations is frozen as
+Scheme A (a stateless index + structural selector across draft, template, and
+online states, with an 8 KiB default / 32 KiB hard-cap budget). The canonical
+spec is in [docs/progressive-disclosure.md](docs/progressive-disclosure.md),
+decided in the [0.1.0 design issue](https://github.com/A2C-SMCP/theseus-kit/issues/2).
 
 ## Development
 

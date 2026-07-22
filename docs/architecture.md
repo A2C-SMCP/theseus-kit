@@ -30,6 +30,9 @@ version remains its own configuration-documentation source of truth.
   upstream API provides it; errors remain actionable and redact request auth.
 - Publish is an explicit operation and is never triggered as a side effect of
   draft editing or template saving.
-- The large-configuration disclosure contract remains undecided until the
-  maintainer selects one of the alternatives in the 0.1.0 design issue.
+- The large-configuration disclosure contract is frozen as a stateless
+  index + structural-selector scheme (Scheme A) covering draft, template, and
+  online states with an 8 KiB default / 32 KiB hard-cap budget. See
+  [progressive-disclosure.md](progressive-disclosure.md) for the canonical
+  spec that the read tools and `window://` resources implement.
 

@@ -11,3 +11,4 @@ build/
 htmlcov/
 .coverage
 coverage.xml
+.idea
