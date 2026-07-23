@@ -20,6 +20,7 @@ dependencies = [
     "mcp>=1.15.0,<2.0.0",
     "pydantic>=2.11.0,<3.0.0",
     "pydantic-settings>=2.10.0,<3.0.0",
+    "tfrs-auth[httpx]>=0.1.1,<1.0.0",
 ]
 
 [project.urls]
@@ -38,6 +39,7 @@ dev = [
     "mypy>=1.17.0,<2.0.0",
     "poethepoet>=0.37.0,<1.0.0",
     "pytest>=8.4.0,<9.0.0",
+    "pytest-asyncio>=1.4.0",
     "ruff>=0.12.0,<1.0.0",
 ]
 test = [
@@ -69,7 +71,7 @@ include = [
 format = "ruff format src tests scripts"
 format-check = "ruff format --check src tests scripts"
 lint = "ruff check src tests scripts"
-typecheck = "mypy src scripts"
+typecheck = "mypy src scripts tests"
 test = "pytest"
 test-cov = "pytest --cov=theseus_kit --cov-report=term-missing --cov-report=xml --cov-fail-under=80"
 lock-check = "uv lock --check"
@@ -86,7 +88,11 @@ sequence = ["lock-check", "check", "test-cov"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+asyncio_mode = "auto"
 addopts = ["--strict-markers", "--tb=short"]
+markers = [
+    "e2e: end-to-end test against a real (near-prod) robot; skipped unless THESEUS_E2E=1 plus THESEUS_* settings are present",
+]
 
 [tool.coverage.run]
 source = ["theseus_kit"]
@@ -103,7 +109,8 @@ select = ["E", "F", "I", "B", "UP"]
 python_version = "3.11"
 strict = true
 pretty = true
-files = ["src", "scripts"]
+plugins = ["pydantic.mypy"]
+files = ["src", "scripts", "tests"]
 
 [[tool.mypy.overrides]]
 module = ["mcp.*"]

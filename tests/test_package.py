@@ -1,5 +1,7 @@
 from importlib.metadata import version
 
+import pytest
+
 from theseus_kit import __version__
 from theseus_kit.server import main, mcp
 
@@ -12,7 +14,7 @@ def test_mcp_server_is_constructed() -> None:
     assert mcp.name == "theseus-kit"
 
 
-def test_main_uses_portable_stdio_transport(monkeypatch) -> None:
+def test_main_uses_portable_stdio_transport(monkeypatch: pytest.MonkeyPatch) -> None:
     transports: list[str] = []
 
     def fake_run(*, transport: str) -> None:
