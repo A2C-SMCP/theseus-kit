@@ -46,7 +46,7 @@ jobs:
         run: |
           if [ "$IS_PRERELEASE" = "true" ]; then release_type=prerelease; else release_type=final; fi
           uv run python scripts/check_release.py --tag "$RELEASE_TAG" --release-type "$release_type" --wheel "$(find dist -name '*.whl' -print -quit)"
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: python-distributions
           path: dist/*
