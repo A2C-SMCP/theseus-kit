@@ -20,6 +20,31 @@ The server does not copy the robot's Factory schema. It reads the target
 robot's llms.txt documentation at runtime so each deployed TFRobotServer
 version remains its own configuration-documentation source of truth.
 
+## Auth and routing (layer 3)
+
+The TFRobot client authenticates via `tfrs-auth` and routes over the cluster's
+`api.<clusterDomain>` entry. Contract (confirmed by tfrs-operator, tracked in
+[#17](https://github.com/A2C-SMCP/theseus-kit/issues/17)):
+
+- **Entry**: `https://api.<clusterDomain>` (Istio gateway, host-authoritative);
+  the in-cluster `tfrobot-http.<ns>` service is not reachable from outside the
+  cluster and is never configured by theseus-kit.
+- **Routing headers**: every robot request carries `X-TF-Namespace`,
+  `X-TF-RobotId`, and `X-TF-RobotType` — all three mandatory (missing any ⇒ 400).
+  theseus-kit produces them from explicit config via `RequestContext`; it never
+  self-derives them and has no dependency on a Manager discovery API.
+- **Identity split**: the token `audience` is `robot:<Account.ID>` (numeric) — a
+  *different* identifier from `X-TF-RobotId` (the rid). These must never be
+  conflated; a single robot has both.
+- **Credentials**: `client_credentials` (the robot's own machine credential; the
+  audience self-derives as `robot:<machine_client_id>`) is the primary source.
+  `user_pat` is supported. Both reuse `tfrs-auth`'s `AsyncCachingTokenSource`
+  (cache / single-flight / near-expiry refresh / backoff) — theseus-kit
+  reimplements none of that machinery.
+- **No auto refresh-retry on robot 401/403**: a rejected token surfaces as a
+  typed `AuthRejectedError`. Refresh-on-401 would require an upstream
+  token-source invalidator (not yet available); until then it is out of scope.
+
 ## Safety invariants
 
 - Credentials stay in the MCP server process and never enter tool output,

@@ -1106,6 +1106,19 @@ wheels = [
 ]
 
 [[package]]
+name = "pytest-asyncio"
+version = "1.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/43/7c/d36d04db312ecf4298932ef77e6e4a9e8ad017906e24e34f0b0c361a2473/pytest_asyncio-1.4.0.tar.gz", hash = "sha256:c6c0d2259945122819f171a32ecea2c349ead889ee28176caaf492143424be42", size = 58514, upload-time = "2026-05-26T09:56:04.083Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/03/e2/08a497ef684b88559c9cc5f4ad53a37e7b99e727094a86d6ea32536d5d3c/pytest_asyncio-1.4.0-py3-none-any.whl", hash = "sha256:933ca923a23075a87fb7070c0ec272a6848489824d887c85c812670932835aa1", size = 16930, upload-time = "2026-05-26T09:56:02.576Z" },
+]
+
+[[package]]
 name = "pytest-cov"
 version = "7.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1514,6 +1527,23 @@ wheels = [
 ]
 
 [[package]]
+name = "tfrs-auth"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyjwt", extra = ["crypto"] },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/16/da/9fc9c99adb38ca863648f43eb83f6dcffc80073e364d1b6f9c64fa2e01b6/tfrs_auth-0.1.1.tar.gz", hash = "sha256:e40759aa105611d79e3d94bdc9a3573e298bbd71a6289642c53ae5e1d053a826", size = 24265, upload-time = "2026-06-23T08:05:36.42Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/81/71/79c7ce0e7e032ebc9e9f8902cdf9e17b6538b74cc058c9b6a8097c02f4fa/tfrs_auth-0.1.1-py3-none-any.whl", hash = "sha256:94a347c2b5a972041deaf0d6fa4910832e37ba5f85f3289d5b7751a449b541b5", size = 25314, upload-time = "2026-06-23T08:05:35.188Z" },
+]
+
+[package.optional-dependencies]
+httpx = [
+    { name = "httpx" },
+]
+
+[[package]]
 name = "theseus-kit"
 version = "0.1.0.dev0"
 source = { editable = "." }
@@ -1522,6 +1552,7 @@ dependencies = [
     { name = "mcp" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "tfrs-auth", extra = ["httpx"] },
 ]
 
 [package.dev-dependencies]
@@ -1534,6 +1565,7 @@ dev = [
     { name = "mypy" },
     { name = "poethepoet" },
     { name = "pytest" },
+    { name = "pytest-asyncio" },
     { name = "ruff" },
 ]
 test = [
@@ -1546,6 +1578,7 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.15.0,<2.0.0" },
     { name = "pydantic", specifier = ">=2.11.0,<3.0.0" },
     { name = "pydantic-settings", specifier = ">=2.10.0,<3.0.0" },
+    { name = "tfrs-auth", extras = ["httpx"], specifier = ">=0.1.1,<1.0.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -1558,6 +1591,7 @@ dev = [
     { name = "mypy", specifier = ">=1.17.0,<2.0.0" },
     { name = "poethepoet", specifier = ">=0.37.0,<1.0.0" },
     { name = "pytest", specifier = ">=8.4.0,<9.0.0" },
+    { name = "pytest-asyncio", specifier = ">=1.4.0" },
     { name = "ruff", specifier = ">=0.12.0,<1.0.0" },
 ]
 test = [{ name = "pytest-cov", specifier = ">=6.2.0,<8.0.0" }]
