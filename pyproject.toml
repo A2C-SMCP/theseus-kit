@@ -36,9 +36,9 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
-    "mypy>=1.17.0,<2.0.0",
+    "mypy>=2.3.0,<3.0.0",
     "poethepoet>=0.37.0,<1.0.0",
-    "pytest>=8.4.0,<9.0.0",
+    "pytest>=9.1.1,<10.0.0",
     "pytest-asyncio>=1.4.0",
     "ruff>=0.12.0,<1.0.0",
 ]
