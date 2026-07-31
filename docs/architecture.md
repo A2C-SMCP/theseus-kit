@@ -45,6 +45,21 @@ The TFRobot client authenticates via `tfrs-auth` and routes over the cluster's
   typed `AuthRejectedError`. Refresh-on-401 would require an upstream
   token-source invalidator (not yet available); until then it is out of scope.
 
+## OAuth (no-PAT) path — design in progress (#18)
+
+When no PAT / `client_credentials` is configured, [#18][#18] adds the standard MCP
+OAuth 2.0/2.1 authorization path. The reuse point is already in place: an OAuth-acquired
+user credential flows through the same `UserJwtCredential` → `AsyncCachingTokenSource` →
+`RobotClient` pipeline above (#18 only adds *where the user credential comes from* and
+credential selection). The standard protocol machinery (PRM/AS discovery, auth-code+PKCE,
+resource indicator) is **reused from the MCP SDK**, not reimplemented; reusable,
+cross-consumer capabilities (RS-side token verification, transport-agnostic OAuth
+acquisition) are proposed upstream to `tfrs-auth`. Full design + slice breakdown:
+[`docs/auth-oauth-design.md`](auth-oauth-design.md); upstream asks:
+[`docs/upstream/tfrs-auth-oauth-feature-request.md`](upstream/tfrs-auth-oauth-feature-request.md).
+
+[#18]: https://github.com/A2C-SMCP/theseus-kit/issues/18
+
 ## Safety invariants
 
 - Credentials stay in the MCP server process and never enter tool output,
