@@ -20,7 +20,7 @@ dependencies = [
     "mcp>=1.15.0,<2.0.0",
     "pydantic>=2.11.0,<3.0.0",
     "pydantic-settings>=2.10.0,<3.0.0",
-    "tfrs-auth[httpx]>=0.1.1,<1.0.0",
+    "tfrs-auth[httpx]>=0.2.1,<1.0.0",
 ]
 
 [project.urls]

@@ -100,7 +100,7 @@ def map_exchange_error(exc: TfrsAuthError) -> TheseusError:
         return ScopeOrAudienceError(
             _hint(
                 message,
-                "受众 / Scope 不足：确认 audience=robot:<Account.ID>、scope（只读=config:read）。",
+                "受众 / Scope 不足：确认 audience=robot:{public_id}、scope（只读=config:read）。",
             )
         )
     return TheseusError(_hint(message, "令牌换发失败。"))

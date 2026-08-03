@@ -60,7 +60,9 @@ def _client(
     sleep: object | None = None,
     api_base_url: str | None = None,
 ) -> RobotClient:
-    credential = cred or ClientCredentialsConfig(machine_client_id="42", machine_client_secret=SecretStr("tfp_secret"))
+    credential = cred or ClientCredentialsConfig(
+        machine_client_id="turingfocus:000042", machine_client_secret=SecretStr("tfp_secret")
+    )
     token_source = build_token_source(
         credential,
         manager_base_url=fake.manager_base_url,
@@ -97,8 +99,8 @@ async def test_exchange_wire_client_credentials(fake_server: FakeRobotServer) ->
         await client.get_llms_txt()
     form = parse_form(fake_server.token_posts()[0].body)
     assert form["grant_type"] == "client_credentials"
-    assert form["client_id"] == "42"
-    assert form["audience"] == "robot:42"  # self-management: callee == client id
+    assert form["client_id"] == "turingfocus:000042"
+    assert form["audience"] == "robot:turingfocus:000042"  # self-management: callee == client id
     assert form["scope"] == "config:read"
     assert form["client_secret"] == "tfp_secret"
     # client_secret IS on the exchange wire (client_credentials grant requires it,
@@ -225,7 +227,9 @@ async def test_network_failure_maps_to_robot_api_error(fake_server: FakeRobotSer
 
 
 def test_secret_not_in_config_repr() -> None:
-    cred = ClientCredentialsConfig(machine_client_id="42", machine_client_secret=SecretStr("tfp_supersecret"))
+    cred = ClientCredentialsConfig(
+        machine_client_id="turingfocus:000042", machine_client_secret=SecretStr("tfp_supersecret")
+    )
     assert "tfp_supersecret" not in repr(cred)
 
 
@@ -248,10 +252,8 @@ async def test_error_message_has_no_secret(fake_server: FakeRobotServer) -> None
 
 
 def test_user_pat_builds_credential_with_correct_audience() -> None:
-    cred = build_credential(UserPatConfig(pat=SecretStr("tfp_pat"), robot_account_id=42))
-    # Do not call .request_form() — upstream PatCredential is a skeleton until
-    # tfrs-auth (cnb#1) ships. Assert the audience/scope theseus-kit wired.
-    assert cred.audience == "robot:42"
+    cred = build_credential(UserPatConfig(pat=SecretStr("tfp_pat"), robot_public_id="turingfocus:000042"))
+    assert cred.audience == "robot:turingfocus:000042"
     assert cred.scope == "config:read"
 
 
@@ -263,10 +265,10 @@ def test_settings_load_client_credentials_from_env(monkeypatch: pytest.MonkeyPat
         "THESEUS_ROBOT__API_BASE_URL": "https://api.example.com",
         "THESEUS_ROBOT__MANAGER_BASE_URL": "https://mgr.example.com",
         "THESEUS_CREDENTIAL__KIND": "client_credentials",
-        "THESEUS_CREDENTIAL__MACHINE_CLIENT_ID": "42",
+        "THESEUS_CREDENTIAL__MACHINE_CLIENT_ID": "turingfocus:000042",
         "THESEUS_CREDENTIAL__MACHINE_CLIENT_SECRET": "tfp_secret",
     }
-    for key in [*env, "THESEUS_CREDENTIAL__PAT", "THESEUS_CREDENTIAL__ROBOT_ACCOUNT_ID"]:
+    for key in [*env, "THESEUS_CREDENTIAL__PAT", "THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID"]:
         monkeypatch.delenv(key, raising=False)
     for k, v in env.items():
         monkeypatch.setenv(k, v)
@@ -349,7 +351,9 @@ async def test_from_settings_builds_working_client(fake_server: FakeRobotServer)
             api_base_url=fake_server.api_base_url,
             manager_base_url=fake_server.manager_base_url,
         ),
-        credential=ClientCredentialsConfig(machine_client_id="42", machine_client_secret=SecretStr("tfp_secret")),
+        credential=ClientCredentialsConfig(
+            machine_client_id="turingfocus:000042", machine_client_secret=SecretStr("tfp_secret")
+        ),
     )
     async with RobotClient.from_settings(settings) as client:
         assert await client.get_llms_txt() == "# robot llms.txt\n"

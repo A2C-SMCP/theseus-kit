@@ -24,11 +24,11 @@ class RobotTarget(BaseModel):
     """One target robot's routing identity + endpoints + TLS.
 
     None of these is the token ``audience``: the ``audience`` is a credential
-    concern (``robot:<Account.ID>``) derived from the credential config. The
+    concern (``robot:{public_id}``) derived from the credential config. The
     ``rid`` here is the ``X-TF-RobotId`` value — a different identifier.
     """
 
-    robot_id: str = Field(description="rid → X-TF-RobotId 与集群内路由（≠ Account.ID）")
+    robot_id: str = Field(description="rid → X-TF-RobotId 与集群内路由（≠ public_id）")
     namespace: str = Field(description="租户 K8s Namespace → X-TF-Namespace")
     robot_type: str = Field(description="机器人类型（如 tfrobot / openclaw）→ X-TF-RobotType")
     api_base_url: str = Field(description="机器人 HTTP 入口 https://api.<clusterDomain>")
@@ -53,15 +53,20 @@ class RobotTarget(BaseModel):
 
 
 class ClientCredentialsConfig(BaseModel):
-    """Robot's own machine credential (primary path, tfrs-auth 0.1.1+).
+    """Robot's own machine credential (primary path, tfrs-auth 0.2.1+).
 
-    For self-management the token ``audience`` is ``robot:<machine_client_id>``
-    — the robot exchanges a token scoped to itself — so no separate account id
-    is required.
+    For self-management the token ``audience`` is ``robot:{public_id}``
+    — the robot exchanges a token scoped to itself — so no separate target
+    identity is required.  ``machine_client_id`` is the ``public_id``
+    (``{orgSlug}:{employeeNo}``), from which org_slug and employee_no are
+    derived for caller == callee self-management.
     """
 
     kind: Literal["client_credentials"] = "client_credentials"
-    machine_client_id: str = Field(description="机器人 machineClientId（自身 Account.ID）")
+    machine_client_id: str = Field(
+        description="机器人 machineClientId — public_id 格式（{orgSlug}:{employeeNo}）",
+        pattern=r"^[a-z0-9-]+:[a-zA-Z0-9]+$",
+    )
     machine_client_secret: SecretStr = Field(description="机器人 machineClientSecret")
 
 
@@ -69,12 +74,16 @@ class UserPatConfig(BaseModel):
     """User personal access token (direct-user / future-OAuth path).
 
     A user PAT can target any of the user's robots, so the target robot's
-    numeric Account.ID must be named explicitly as the token ``audience``.
+    ``public_id`` (``{orgSlug}:{employeeNo}``) must be named explicitly as the
+    token ``audience``.
     """
 
     kind: Literal["user_pat"] = "user_pat"
     pat: SecretStr = Field(description="用户个人访问令牌（tfp_…）")
-    robot_account_id: int = Field(description="目标机器人 Account.ID（数字）→ audience robot:<id>")
+    robot_public_id: str = Field(
+        description="目标机器人 public_id（{orgSlug}:{employeeNo}）→ audience robot:{public_id}",
+        pattern=r"^[a-z0-9-]+:[a-zA-Z0-9]+$",
+    )
 
 
 CredentialConfig = Annotated[ClientCredentialsConfig | UserPatConfig, Field(discriminator="kind")]

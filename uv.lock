@@ -1571,14 +1571,14 @@ wheels = [
 
 [[package]]
 name = "tfrs-auth"
-version = "0.1.1"
+version = "0.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pyjwt", extra = ["crypto"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/16/da/9fc9c99adb38ca863648f43eb83f6dcffc80073e364d1b6f9c64fa2e01b6/tfrs_auth-0.1.1.tar.gz", hash = "sha256:e40759aa105611d79e3d94bdc9a3573e298bbd71a6289642c53ae5e1d053a826", size = 24265, upload-time = "2026-06-23T08:05:36.42Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/37/2c/ffb767e58cdce4421d6a09a0fa1e02708b5e48920a0e53e7c79f9e8edcec/tfrs_auth-0.2.1.tar.gz", hash = "sha256:f7c3f8f79b5b5140acfe8698837f6892f5447ff33c33e032cdc214aa291a813f", size = 36123, upload-time = "2026-08-03T06:34:22.383Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/81/71/79c7ce0e7e032ebc9e9f8902cdf9e17b6538b74cc058c9b6a8097c02f4fa/tfrs_auth-0.1.1-py3-none-any.whl", hash = "sha256:94a347c2b5a972041deaf0d6fa4910832e37ba5f85f3289d5b7751a449b541b5", size = 25314, upload-time = "2026-06-23T08:05:35.188Z" },
+    { url = "https://files.pythonhosted.org/packages/e4/65/884ed44320e9e22c3514b41938be16fc3a919be4874044aa6f2c67bca1a6/tfrs_auth-0.2.1-py3-none-any.whl", hash = "sha256:99c5725ce3acc65666ecd2faac932903072555e61e93547d517e11c430ee792e", size = 32309, upload-time = "2026-08-03T06:34:20.678Z" },
 ]
 
 [package.optional-dependencies]
@@ -1621,7 +1621,7 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.15.0,<2.0.0" },
     { name = "pydantic", specifier = ">=2.11.0,<3.0.0" },
     { name = "pydantic-settings", specifier = ">=2.10.0,<3.0.0" },
-    { name = "tfrs-auth", extras = ["httpx"], specifier = ">=0.1.1,<1.0.0" },
+    { name = "tfrs-auth", extras = ["httpx"], specifier = ">=0.2.1,<1.0.0" },
 ]
 
 [package.metadata.requires-dev]
