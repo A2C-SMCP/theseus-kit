@@ -1,6 +1,6 @@
 # #18 — MCP OAuth 2.0 授权登录(无 PAT 时):技术设计
 
-> 状态:**设计草案,待评审**(本文档即 #18 的实施前置)。关联 issue
+> 状态:**§10.1-new 已定夺(2026-08-03, TFRobotServer 确认直收) — 进入实施阶段**。
 > [#18](https://github.com/A2C-SMCP/theseus-kit/issues/18)。
 > 范围声明:本文为「准备」产物,不含实现代码;经评审与上游契约确认后再进入实施。
 
@@ -84,33 +84,36 @@ theseus-kit 只做 **MCP-server 集成**(暴露 PRM、校验 Bearer、把用户�
 ```
 +--------+   OAuth(Authorization Code+PKCE)   +-----------------+
 | MCP    | ─────────────────────────────────▶ │ TFRSManager AS  │
-| Client | ◀──── access_token (aud=theseus) ─ │ (issuer)        |
+| Client | ◀── access_token (aud={iss}/…) ── │ (issuer)        |
 |        │                                    +-----------------+
-|        │  Bearer: access_token (aud=theseus-kit PRM resource)
+|        │  Bearer: access_token
 |        | ─────────────────────────────────▶ +-----------------+
 +--------+                                    │ theseus-kit RS  │
                                               │ ① 校验 Bearer   │
                                               │   (tfrs-auth)   │
-                                              │ ② 用户身份 →    │
-                                              │   UserJwtCred.  │
-                                              │   → Async…Token │
-                                              │   → robot JWT   │
-                                              │   (aud=robot:…) │
-                                              | ③ RobotClient   |
-                                              |   + X-TF-* ───▶ robot
-                                              +-----------------+
+                                              │ ② 直传 token    │
+                                              │   + X-TF-* ───▶ +-----------------+
+                                              +-----------------+   TFRobotServer  │
+                                                                    │ ③ 验签+scope  │
+                                                                    │ ④ 执行请求    │
+                                                                    +-----------------+
 ```
 
-**theseus-kit 做的事**(RS 角色,~配置 + 三段连线):
+**theseus-kit 做的事**(RS 角色,~配置 + 两段连线,比原设计少一步):
 1. 启动时挂 `create_protected_resource_routes(resource_url=<theseus-kit HTTP 入口>,
    authorization_servers=[<TFRSManager AS URL>], scopes_supported=[config:read,...])`。
-2. 实现 `TokenVerifier`:用 tfrs-auth 校验 MCP Client 的 Bearer(签名/JWKS、`iss`、
-   `aud`=theseus-kit PRM resource、所需 scope、过期、撤销水位 §12.2),提取用户身份(`sub`)。
-3. 把验证后的用户身份,经 `UserJwtCredential` → 现有 `AsyncCachingTokenSource` → `RobotClient`,
-   得到 `aud=robot:<Account.ID>` 的短 JWT 调用机器人。
+2. 实现 `TokenVerifier`:用 tfrs-auth 0.2.1 校验 MCP Client 的 Bearer(签名/JWKS、`iss`、
+   `aud`、所需 scope、过期、撤销水位),提取用户身份(`sub`)。
+3. 验证后的 OAuth AS token **直接**作为 Bearer 转发给 TFRobotServer（经 `RobotClient`
+   注入 X-TF-* 路由头），**无需换发**。TFRobotServer 的 `expected_token_profiles()` 原生
+   接受 `aud={issuer}/robots/<id>` + `typ=at+jwt` 格式。
 
-**不变式**:MCP access token(aud=theseus-kit)**绝不**转发给机器人;机器人只收到
-audience 重新绑定为 `robot:<id>` 的换发短 JWT(与现有 `redaction` / 架构安全不变式一致)。
+**关键简化**(vs 原设计):
+- ~~step ② 用户身份 → UserJwtCredential → AsyncCachingTokenSource → robot JWT~~（删除）
+- `AsyncCachingTokenSource` 只服务 PAT/client_credentials 路径
+- OAuth 路径新增静态令牌源：直接持有已验 token，不做换发/缓存/刷新
+- 令牌边界更新：OAuth AS token **可以**转发给 TFRobotServer（原生接受），
+  但绝不泄露到日志/异常/MCP 结果
 
 ## 7. Topology B — STDIO 外部回调(theseus-kit 自驱授权)
 
@@ -134,13 +137,20 @@ theseus-kit(STDIO)
 无论 A/B,终态都是:
 
 ```
-(user identity) ─▶ UserJwtCredential(audience=robot:<Account.ID>, scope=config:read…)
-                 ─▶ AsyncCachingTokenSource  # 与 #17 完全同一,零新增换发机械件
-                 ─▶ RobotClient(RobotAuth: Bearer + X-TF-*)
+(OAuth AS token, 已验证) ─▶ RobotClient(RobotAuth: Bearer + X-TF-*) ─▶ TFRobotServer
+                                                         ▲
+(PAT / client_credentials) ─▶ AsyncCachingTokenSource ──┘
+                              (换发+缓存, #17 已有)
 ```
 
-`RobotTarget`、`RequestContext`、`RobotClient`、`redaction`、错误映射**全部复用**;
-#18 新增的仅是"用户身份从哪来"(OAuth)与"凭证选择"。
+**两条路径的差异**:
+| 路径 | 令牌来源 | 是否换发 | 缓存/刷新 |
+|------|----------|----------|-----------|
+| PAT / client_credentials | `AsyncCachingTokenSource` | 是(RFC 8693) | 是 |
+| OAuth | MCP Client Bearer(静态) | 否(直传) | 否(MCP Client 侧负责) |
+
+`RobotTarget`、`RequestContext`、`RobotClient`(含 `RobotAuth`)、`redaction`、错误映射
+**全部复用**;#18 新增的仅是"用户身份从哪来"(OAuth)与"凭证选择"。
 
 ## 9. 安全模型(逐条对应验收标准)
 
@@ -170,23 +180,33 @@ JWT(`auth.GenerateToken` 签、HS256),**不是** OAuth AS access token。换发�
 
 ⇒ `UserJwtCredential(user_jwt=<#3>, audience=robot:<id>)` 这条接缝**作废**。
 
-### 10.1-new [新命门,第一优先] OAuth AS 令牌能否在机器人侧**直接使用**(跳过换发)?
+### 10.1-new [已定夺:是,直收] OAuth AS 令牌能否在机器人侧**直接使用**(跳过换发)?
 
-取代 §10.1 成为第一命门。#3 本身 robot-scoped(aud=`{iss}/robots/<Account.ID>`),直觉上无需
-再换发。**待确认的一处**:TFRobotServer 验签器(tfrs-auth RS256+JWKS,强制执行层在
-TFRobotServer)目前按 `robot:<Account.ID>` 校验 audience;#3 的 audience 是
-`{iss}/robots/<id>`、claims 是 C1(sub=`user:<id>`、`client_id`)。**机器人侧是否也接受 #3
-这套 audience/claims 形态**——是"直收"成立的前提,需 TFRobotServer 侧确认(或翻其验签代码)。
+**结论(2026-08-03,TFRobotServer 团队确认):是。** TFRobotServer 的
+`expected_token_profiles()` 已原生支持 `aud={issuer}/robots/<Account.ID>` 格式
+（`jwt_verifier.py:172-187`），作为 `OAUTH_ACCESS_TOKEN_TYPE`（`at+jwt`）一等公民存在。
 
-- **若直收**:theseus-kit OAuth 路径**去掉换发**;`UserJwtCredential`/`AsyncCachingTokenSource`
-  只服务 PAT/client_credentials;原 AC#4 重写为"送机器人的令牌须 robot-audience 绑定"(#3 满足);
-  `Account.ID` 角色从"设 audience"降为"校验 audience 目标";设计大幅简化。
-- **若不直收**:Topology A 在不改上游下**跑不通**(theseus-kit 只持 #3,且 #3 不可换发、无登录
-  JWT/PAT 可换)→ 需 TFRSManager **选项 C**(扩 `principalFromUserJWT` 增 RS256 分支 + 先改
-  Contract Registry C1,遵循"契约先行"),theseus-kit 等待。
+**TFRobotServer 接受的三种 audience 格式**:
+1. `robot:{robot_id}` — 传统格式
+2. `robot:{machine_client_id}` — public_id 格式
+3. `{issuer}/robots/{machine_client_id}` — OAuth AS token 格式（**本路径**）
 
-> 注:§6 step ②、§8、§11 中"OAuth 用户凭证 → 换发 → robot JWT"的描述,以本节定夺为准——
-> 换发接缝已作废;是否仍有任何"转换"步骤取决于 §10.1-new。
+**OAuth AS token 直收的四要素校验**（TFRobotServer 侧）:
+1. **audience 匹配**: `jwt.decode()` 接受列表，命中任一即通过
+2. **JOSE typ 强制**: `aud={issuer}/robots/{id}` 的 token 必须带 `typ=at+jwt` header（RFC 9068）——阻止旧 PAT（`typ=JWT`）冒充
+3. **client_id claim 强制**: `typ=at+jwt` 的 token 必须含 `client_id` claim
+4. **scope 校验**: `scope_guard.py:enforce_scope()` 按 route→scope 契约逐路由校验
+
+**前置条件**（TFRobotServer 部署配置）:
+- `admin.machine_client_id` ≠ `"NOT_SET"`（即本机 Account.ID / public_id）
+- `admin.issuer` ≠ `"NOT_SET"`（即 Manager AS 的 issuer URL）
+- 若配置了 `admin.org_slug`，则 JWT 须额外包含 `org` claim 并精确匹配
+
+**对 theseus-kit 的影响**:
+- **OAuth 路径去掉换发环节** — `UserJwtCredential`/`AsyncCachingTokenSource` 只服务 PAT/client_credentials
+- **令牌直通** — theseus-kit 验证 OAuth AS token 后，直接作为 Bearer 转发给 TFRobotServer
+- **新增 StaticToken 源** — 区别于 `AsyncCachingTokenSource`（换发+缓存），OAuth 路径需要简单的静态令牌源（每个 MCP 请求携带的 token 直接使用）
+- **设计大幅简化** — §6 Topology A 的 step ②③ 合并为「验证 → 直传」，S3（换发接缝）不再需要
 
 ### 10.2 对 tfrs-foundation-py(tfrs-auth)的 Feature Request
 
@@ -211,17 +231,21 @@ TFRobotServer)目前按 `robot:<Account.ID>` 校验 audience;#3 的 audience 是
 | token/auth-code/PAT 不入日志/异常/MCP 结果/明文配置 | `redaction` 扩展 + S5 |
 | 不支持浏览器/OAuth 的 Client/STDIO 返回明确可操作不泄密提示 | Topology B(S4)+ S5 |
 
-## 12. 实施切片(Epic #18 → Stories,设计评审后再正式建子 Issue)
+## 12. 实施切片(Epic #18 → Stories,§10.1-new 已定夺后更新)
 
-| Story | 内容 | 依赖 |
-|-------|------|------|
-| **S1** 凭证选择 + OAuth 配置 | 扩展 `CredentialConfig` 判别联合(加 `oauth` kind);PAT/OAuth 互斥、不完整配置→`ConfigError`;`TheseusSettings` 校验 | — |
-| **S2** RS PRM + Bearer 校验(HTTP) | 挂 `create_protected_resource_routes`;实现 `TokenVerifier`(tfrs-auth);提取用户身份 | tfrs-auth P0;§10.1 |
-| **S3** 用户身份 → robot JWT 接缝 | `UserJwtCredential` → 现有 `AsyncCachingTokenSource` → `RobotClient`;audience/scope 绑定;令牌边界不变式 | tfrs-auth 0.2.0 |
-| **S4** STDIO 外部回调采集 | 浏览器 + 本地回调 + 安全缓存 + 可恢复重登录(`ReauthRequiredError`) | tfrs-auth P1 |
-| **S5** 安全加固 | `redaction` 扩展(OAuth token/code/state);配置/日志/MCP 结果全链路无泄密审计 | — |
-| **S6** 测试矩阵 | hermetic(PRM/发现/PKCE/Resource Indicator/state-重放/刷新/重新授权/step-up,对 fakes)+ e2e(真连 TFRSManager AS,`THESEUS_E2E=1`) | S2–S4 |
-| **S7** 文档 | 更新 `architecture.md` §Auth;运行手册(登录/重登/排错) | — |
+| Story | 内容 | 依赖 | 状态 |
+|-------|------|------|------|
+| **S1** 凭证选择 + OAuth 配置 | 扩展 `CredentialConfig` 判别联合(加 `oauth` kind);PAT/OAuth 互斥、不完整配置→`ConfigError`;`TheseusSettings` 校验 | — | 待开始 |
+| **S2** RS PRM + Bearer 校验(HTTP) | 挂 `create_protected_resource_routes`;实现 `TokenVerifier`(tfrs-auth 0.2.1 `JwtVerifier.verify(required_scope=, revocation_watermark=)` + `discovery` 模块);提取用户身份 | tfrs-auth 0.2.1 ✅ | 待开始 |
+| **S3** OAuth 令牌直传 + RobotClient 适配 | 新增静态令牌源（区别于 `AsyncCachingTokenSource`）;`RobotClient` 支持直接持有已验 token 转发给 TFRobotServer;令牌边界守护 | S2 | 待开始 |
+| **S4** STDIO 外部回调采集 | 浏览器 + 本地回调 + 安全缓存 + 可恢复重登录(`ReauthRequiredError`) | tfrs-auth P1 | 待开始 |
+| **S5** 安全加固 | `redaction` 扩展(OAuth token/code/state);配置/日志/MCP 结果全链路无泄密审计 | — | 待开始 |
+| **S6** 测试矩阵 | hermetic(PRM/发现/PKCE/Resource Indicator/state-重放/刷新/重新授权/step-up,对 fakes)+ e2e(真连 TFRSManager AS + TFRobotServer,`THESEUS_E2E=1`) | S2–S4 | 待开始 |
+| **S7** 文档 | 更新 `architecture.md` §Auth;运行手册(登录/重登/排错) | — | 待开始 |
+
+> **vs 原设计变更**: 原 S3（用户身份 → robot JWT 换发接缝）已删除 — §10.1-new 确认
+> TFRobotServer 直收 OAuth AS token。新增 S3 为「OAuth 令牌直传 + RobotClient 适配」
+> （静态令牌源），复杂度远低于原换发接缝。
 
 > 按本仓 Phase 4 测试触发器:S2/S3「打通鉴权执行路径」+「触及真实契约」→ 新增测试须
 > 真跑真实设施(TFRSManager AS + robot),当次至 PASS;全量 e2e 仍属 user-trigger。
@@ -231,6 +255,9 @@ TFRobotServer)目前按 `robot:<Account.ID>` 校验 audience;#3 的 audience 是
 - **阻塞已解除**:#17(PAT/短 token + 路由上下文)已合并;#18 的前置就绪。
 - **阻塞 #3**:HTTP Adapter(#3)须同时容纳显式 PAT 与无 PAT 的 OAuth;本设计 S2 的
   RS 集成即 #3 鉴权侧的公共抽象,#18 定稿后 #3 不返工。
-- **风险**:① §10.1-new 机器人侧是否直收 OAuth AS 令牌(取代已否决的 §10.1;决定 OAuth 路径是否还需换发 / 是否需上游选项 C);② STDIO 拓扑
-  依赖 tfrs-auth P1 新能力(否则 theseus-kit 需临时自实现一份,违背复用原则——应等上游);
-  ③ MCP SDK 版本能力边界(FastMCP 挂载 PRM 路由 + bearer 中间件的具体 API)需实现期核验。
+- **风险①** ~~§10.1-new~~ → **已解除**(2026-08-03):TFRobotServer 确认直收 OAuth AS token,
+  OAuth 路径无需换发,设计大幅简化。
+- **风险②** STDIO 拓扑依赖 tfrs-auth P1 新能力(否则 theseus-kit 需临时自实现一份,
+  违背复用原则——应等上游)。
+- **风险③** MCP SDK 版本能力边界(FastMCP 挂载 PRM 路由 + bearer 中间件的具体 API)
+  需实现期核验。
