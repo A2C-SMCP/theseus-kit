@@ -250,6 +250,109 @@ async def test_error_message_has_no_secret(fake_server: FakeRobotServer) -> None
     assert "tfp_secret" not in str(exc_info.value)
 
 
+# --- redaction: OAuth extended patterns (#25) ---------------------------------
+
+
+def test_redact_oauth_access_token_jwt() -> None:
+    """RS256 OAuth AS access token (RFC 9068 at+jwt) is caught by JWT pattern."""
+    # Realistic OAuth AS token with typ=at+jwt header
+    token = (
+        "eyJhbGciOiJSUzI1NiIsInR5cCI6ImF0K2p3dCIsImtpZCI6InRlc3Qta2lkIn0"
+        ".eyJpc3MiOiJodHRwczovL21hbmFnZXIuZXhhbXBsZS5jb20iLCJzdWIiOiJ1c2VyOjQyIiw"
+        "iYXVkIjoiaHR0cHM6Ly9tYW5hZ2VyLmV4YW1wbGUuY29tL3JvYm90cy80MiIsInNjb3BlIj"
+        "oiY29uZmlnOnJlYWQiLCJleHAiOjk5OTk5OTk5OTksImlhdCI6MTIzNDU2Nzg5MH0"
+        ".ZmFrZVNpZ25hdHVyZQ"
+    )
+    out = redact_secrets(f"Bearer {token}")
+    assert token not in out
+    assert REDACTED in out
+
+
+def test_redact_opaque_refresh_token_long_base64url() -> None:
+    """40+ character base64url string is redacted as opaque token."""
+    # Simulates an opaque refresh token (~43 chars)
+    refresh = "aGVsbG8td29ybGQtdGhpcy1pcy1hLXJlZnJlc2gtdG9rZW4"  # 46 chars
+    out = redact_secrets(f"refresh failed: {refresh}")
+    assert refresh not in out
+    assert REDACTED in out
+
+
+def test_redact_state_value_long_base64url() -> None:
+    """Long state parameter is caught by opaque pattern even without context."""
+    state = "c3RhdGUtdmFsdWUtZm9yLWNzcmYtcHJvdGVjdGlvbi0xMjM0NQ"  # 47 chars
+    out = redact_secrets(f"invalid state: {state}")
+    assert state not in out
+    assert REDACTED in out
+
+
+def test_redact_auth_code_in_url_query() -> None:
+    """Authorization code in ?code=... query string is caught by param pattern."""
+    out = redact_secrets("callback?code=SplxlOBeZQQYbYS6WxSbIA&state=abc")
+    assert "SplxlOBeZQQYbYS6WxSbIA" not in out
+    assert REDACTED in out
+
+
+def test_redact_refresh_token_in_json() -> None:
+    """Refresh token in JSON \"refresh_token\":\"...\" is caught by param pattern."""
+    out = redact_secrets(
+        '{"access_token":"eyJhbGci.xxx.yyy","refresh_token":"dGhpcy1pcy1hLXJlZnJlc2gtdG9rZW4tdmFsdWU"}'
+    )
+    assert "dGhpcy1pcy1hLXJlZnJlc2gtdG9rZW4tdmFsdWU" not in out
+    assert REDACTED in out
+
+
+def test_redact_state_in_json() -> None:
+    """State in JSON \"state\":\"...\" is caught by param pattern."""
+    out = redact_secrets('{"state":"c2hvcnQtc3RhdGU","code":"authcode123456789"}')
+    assert "c2hvcnQtc3RhdGU" not in out
+    assert "authcode123456789" not in out
+    assert REDACTED in out
+
+
+def test_redact_code_in_form_body() -> None:
+    """Authorization code in form-encoded body is caught by param pattern."""
+    out = redact_secrets("grant_type=authorization_code&code=AuthCode123456789&redirect_uri=http://localhost/cb")
+    assert "AuthCode123456789" not in out
+    assert REDACTED in out
+
+
+def test_redact_mixed_credential_patterns() -> None:
+    """PAT, JWT, opaque token, and OAuth param all redacted in one pass."""
+    text = (
+        "pat=tfp_mysecrettoken123 "
+        "jwt=eyJhbGci.sig.payload "
+        "refresh=this-is-a-very-long-refresh-token-string-with-40-plus-chars "
+        "callback?code=ShortAuthCode12345&state=done"
+    )
+    out = redact_secrets(text)
+    assert "tfp_mysecrettoken123" not in out
+    assert "eyJhbGci.sig.payload" not in out
+    assert "this-is-a-very-long-refresh-token-string-with-40-plus-chars" not in out
+    assert "ShortAuthCode12345" not in out
+    assert REDACTED in out
+
+
+def test_redact_no_false_positive_short_strings() -> None:
+    """Short alphanumeric strings are not mistakenly redacted."""
+    text = "error=invalid_grant error_description=The+authorization+code+is+invalid"
+    out = redact_secrets(text)
+    # The entire message should pass through unchanged (no <<redacted>>)
+    assert REDACTED not in out
+    assert out == text
+
+
+def test_redact_no_false_positive_normal_text() -> None:
+    """Normal prose and code identifiers are not redacted."""
+    text = (
+        "File /path/to/module.py, line 42, in handle_request\n"
+        "ConnectionError: [Errno 61] Connection refused\n"
+        "POST https://api.example.com/v1/factory/llm-docs/index HTTP/1.1"
+    )
+    out = redact_secrets(text)
+    assert REDACTED not in out
+    assert out == text
+
+
 # --- user_pat wiring (PatCredential request_form is still a skeleton) --------
 
 
