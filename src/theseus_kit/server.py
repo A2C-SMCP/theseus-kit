@@ -36,7 +36,7 @@ def create_mcp_server(settings: TheseusSettings | None = None) -> FastMCP:
         auth = AuthSettings(
             issuer_url=AnyHttpUrl(cred.authorization_server),
             resource_server_url=(AnyHttpUrl(resource_url) if resource_url is not None else None),
-            required_scopes=list(_parse_space_separated(cred.scopes)),
+            required_scopes=sorted(_parse_space_separated(cred.scopes)),
         )
 
         verifier = _LazyOAuthTokenVerifier(
