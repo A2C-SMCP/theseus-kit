@@ -24,7 +24,7 @@ from typing import Any
 
 import httpx
 from mcp.server.auth.provider import AccessToken
-from tfrs_auth import JwtVerifier, TokenVerificationError
+from tfrs_auth import Claims, JwtVerifier, TokenVerificationError
 from tfrs_auth.discovery import fetch_as_metadata
 
 
@@ -82,26 +82,20 @@ class TheseusTokenVerifier:
         )
 
 
-def _claims_to_dict(claims: Any) -> dict[str, Any]:
+def _claims_to_dict(claims: Claims) -> dict[str, Any]:
     """Extract the full claims payload for downstream forwarding (S3)."""
-    from tfrs_auth import Claims
-
-    if isinstance(claims, Claims):
-        return {
-            "iss": claims.iss,
-            "sub": claims.sub,
-            "aud": claims.aud,
-            "org": claims.org,
-            "scope": claims.scope,
-            "exp": claims.exp,
-            "iat": claims.iat,
-            "jti": claims.jti,
-            "act": dict(claims.act) if claims.act else None,
-            **claims.extra,
-        }
-
-    # Fallback for non-Claims return (future-proofing).
-    return dict(getattr(claims, "extra", {}))  # pragma: no cover
+    return {
+        "iss": claims.iss,
+        "sub": claims.sub,
+        "aud": claims.aud,
+        "org": claims.org,
+        "scope": claims.scope,
+        "exp": claims.exp,
+        "iat": claims.iat,
+        "jti": claims.jti,
+        "act": dict(claims.act) if claims.act else None,
+        **claims.extra,
+    }
 
 
 async def build_token_verifier(

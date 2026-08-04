@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import TYPE_CHECKING
 
 from mcp.server.auth.provider import AccessToken
 from mcp.server.auth.settings import AuthSettings
@@ -11,6 +11,9 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import AnyHttpUrl
 
 from .config import OAuthConfig, TheseusSettings
+
+if TYPE_CHECKING:
+    from .oauth import TheseusTokenVerifier
 
 _INSTRUCTIONS = (
     "Inspect and manage TFRobot configuration. Read the exposed editing skills "
@@ -70,7 +73,7 @@ class _LazyOAuthTokenVerifier:
         self._authorization_server = authorization_server
         self._required_scope = required_scope
         self._audience = audience
-        self._verifier: Any = None  # TheseusTokenVerifier, lazy-imported
+        self._verifier: TheseusTokenVerifier | None = None
         self._lock = asyncio.Lock()
 
     async def verify_token(self, token: str) -> AccessToken | None:

@@ -168,6 +168,7 @@ class RobotClient:
         *,
         robot: RobotTarget,
         scope: str = "",
+        expires_at: float | None = None,
     ) -> RobotClient:
         """Build a client that forwards a pre-validated OAuth AS token.
 
@@ -177,8 +178,14 @@ class RobotClient:
         routing headers — no token exchange, caching, or refresh.
 
         *robot* provides the routing identity (X-TF-*) and the API base URL.
+
+        Callers SHOULD extract ``exp`` from the validated
+        :class:`~mcp.server.auth.provider.AccessToken.claims` and pass it as
+        *expires_at*. When omitted, the token is treated as never-expiring
+        (``float("inf")``), which means theseus-kit cannot distinguish an
+        expired token from a genuinely unauthorized one.
         """
-        source = StaticTokenSource(access_token=token, scope=scope)
+        source = StaticTokenSource(access_token=token, scope=scope, expires_at=expires_at)
         context = RequestContext(
             robot_id=robot.robot_id,
             namespace=robot.namespace,
