@@ -45,20 +45,68 @@ The TFRobot client authenticates via `tfrs-auth` and routes over the cluster's
   typed `AuthRejectedError`. Refresh-on-401 would require an upstream
   token-source invalidator (not yet available); until then it is out of scope.
 
-## OAuth (no-PAT) path — design in progress (#18)
+## OAuth (no-PAT) path (#18)
 
-When no PAT / `client_credentials` is configured, [#18][#18] adds the standard MCP
-OAuth 2.0/2.1 authorization path. The reuse point is already in place: an OAuth-acquired
-user credential flows through the same `UserJwtCredential` → `AsyncCachingTokenSource` →
-`RobotClient` pipeline above (#18 only adds *where the user credential comes from* and
-credential selection). The standard protocol machinery (PRM/AS discovery, auth-code+PKCE,
-resource indicator) is **reused from the MCP SDK**, not reimplemented; reusable,
-cross-consumer capabilities (RS-side token verification, transport-agnostic OAuth
-acquisition) are proposed upstream to `tfrs-auth`. Full design + slice breakdown:
-[`docs/auth-oauth-design.md`](auth-oauth-design.md); upstream asks:
-[`docs/upstream/tfrs-auth-oauth-feature-request.md`](upstream/tfrs-auth-oauth-feature-request.md).
+When ``kind=oauth`` is configured, theseus-kit acts as an OAuth
+Protected Resource (RS) per the MCP Authorization specification — an alternative
+to the PAT / ``client_credentials`` path. The MCP Client
+drives the standard OAuth 2.0/2.1 authorization-code + PKCE flow against the
+TFRSManager AS; theseus-kit validates the resulting Bearer token and forwards it
+directly to TFRobotServer — **no token exchange** (TFRobotServer natively accepts
+OAuth AS tokens, confirmed by the TFRobotServer team). Full rationale:
+[`docs/auth-oauth-design.md`](auth-oauth-design.md) §10.1-new.
 
-[#18]: https://github.com/A2C-SMCP/theseus-kit/issues/18
+The two credential paths converge at `RobotClient` but follow different mechanics
+upstream:
+
+**Path A — PAT / client_credentials** (exchange pipeline, #17):
+
+```
+TheseusSettings(credential)
+  → build_credential()         # config → tfrs_auth.ClientCredentials | PatCredential
+  → build_token_source()       # AsyncCachingTokenSource (cache / single-flight / near-expiry refresh / backoff)
+  → RobotClient(RobotAuth)     # Bearer + X-TF-* per request
+```
+
+**Path B — OAuth** (direct forward, #18 S1–S3):
+
+```
+MCP Client (OAuth授权 + Bearer)
+  → TheseusTokenVerifier       # RS256 + JWKS (tfrs-auth JwtVerifier), local validation
+  → StaticTokenSource          # pre-validated token, no exchange / caching / refresh
+  → RobotClient(RobotAuth)     # same Bearer + X-TF-* injection
+```
+
+| Path | Token source | Exchange (RFC 8693) | Cache / refresh |
+|------|-------------|---------------------|-----------------|
+| PAT / client_credentials | `AsyncCachingTokenSource` | Yes | Yes |
+| OAuth | `StaticTokenSource` | No (direct forward) | No (MCP Client side) |
+
+Key modules added for #18 (see [`auth-oauth-design.md`](auth-oauth-design.md) §12 for
+the full slice breakdown):
+
+- **`oauth.py`**: `TheseusTokenVerifier` — adapts `tfrs_auth.JwtVerifier` →
+  MCP SDK `TokenVerifier` protocol. `build_token_verifier()` performs RFC 8414
+  AS metadata discovery to obtain ``jwks_uri`` and ``issuer``.
+- **`server.py`**: `_LazyOAuthTokenVerifier` defers async AS discovery to the first
+  ``verify_token`` call (single-flight lock). `create_mcp_server()` wires
+  `AuthSettings` + `token_verifier` when `OAuthConfig` is detected.
+- **`transport.py`**: `StaticTokenSource` — holds a pre-validated bearer with no
+  exchange/caching/refresh. `RobotClient.for_static_token()` factory for the OAuth
+  path. `RobotAuth` accepts `AsyncCachingTokenSource | StaticTokenSource`.
+- **`config.py`**: `OAuthConfig` — `authorization_server`, `scopes`, `client_id`,
+  `redirect_uri`, `resource_server_url`. Added as third variant to the
+  `CredentialConfig` discriminated union.
+
+**Topology B (STDIO external callback, S4)**: not yet implemented — depends on the
+P1 upstream capability in tfrs-auth (transport-agnostic OAuth 2.1 acquisition client).
+See [`docs/upstream/tfrs-auth-oauth-feature-request.md`](upstream/tfrs-auth-oauth-feature-request.md).
+
+**Credential selection**: the `CredentialConfig` discriminated union is keyed on
+``kind``. Set ``kind=oauth`` to activate the OAuth path; set
+``kind=client_credentials`` or ``kind=user_pat`` for the PAT path. Only one kind
+is active at a time — the discriminated union prevents co-existence. See
+[`docs/oauth-operations.md`](oauth-operations.md) for the user-facing guide.
 
 ## Safety invariants
 
