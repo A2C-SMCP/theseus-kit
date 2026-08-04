@@ -376,8 +376,12 @@ class TestOAuthConfigEnvLoading:
         for key in env:
             monkeypatch.setenv(key, env[key])
         # Also clear any PAT / client_credentials env that might linger.
-        for stale in ["THESEUS_CREDENTIAL__MACHINE_CLIENT_ID", "THESEUS_CREDENTIAL__MACHINE_CLIENT_SECRET",
-                       "THESEUS_CREDENTIAL__PAT", "THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID"]:
+        for stale in [
+            "THESEUS_CREDENTIAL__MACHINE_CLIENT_ID",
+            "THESEUS_CREDENTIAL__MACHINE_CLIENT_SECRET",
+            "THESEUS_CREDENTIAL__PAT",
+            "THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID",
+        ]:
             monkeypatch.delenv(stale, raising=False)
         settings = TheseusSettings()
         assert isinstance(settings.credential, OAuthConfig)

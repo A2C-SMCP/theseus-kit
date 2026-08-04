@@ -115,6 +115,14 @@ class OAuthConfig(BaseModel):
         default=None,
         description="STDIO 外部回调 URI（Topology B）；Topology A（HTTP/MCP Client）不需要",
     )
+    resource_server_url: str | None = Field(
+        default=None,
+        description=(
+            "theseus-kit PRM resource URL（Topology A HTTP 入口），"
+            "用作 token audience 校验 + AuthSettings.resource_server_url；"
+            "None 跳过 audience 校验（宽松模式，仅开发/调试）"
+        ),
+    )
 
     @field_validator("authorization_server")
     @classmethod
@@ -130,10 +138,15 @@ class OAuthConfig(BaseModel):
             raise ValueError(f"redirect_uri must start with http:// or https://; got {value!r}")
         return value
 
+    @field_validator("resource_server_url")
+    @classmethod
+    def _validate_resource_server_url(cls, value: str | None) -> str | None:
+        if value is not None and not value.startswith(("http://", "https://")):
+            raise ValueError(f"resource_server_url must start with http:// or https://; got {value!r}")
+        return value
 
-CredentialConfig = Annotated[
-    ClientCredentialsConfig | UserPatConfig | OAuthConfig, Field(discriminator="kind")
-]
+
+CredentialConfig = Annotated[ClientCredentialsConfig | UserPatConfig | OAuthConfig, Field(discriminator="kind")]
 
 
 class TheseusSettings(BaseSettings):

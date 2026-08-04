@@ -19,7 +19,9 @@ from theseus_kit.errors import (
     SubscriptionFrozenError,
     TheseusError,
 )
+from theseus_kit.oauth import TheseusTokenVerifier, build_token_verifier
 from theseus_kit.routing import RequestContext
+from theseus_kit.server import create_mcp_server
 from theseus_kit.transport import RobotClient
 
 __version__ = "0.1.0.dev0"
@@ -43,4 +45,7 @@ __all__ = [
     "ExchangeUnavailableError",
     "AuthRejectedError",
     "RobotApiError",
+    "TheseusTokenVerifier",
+    "build_token_verifier",
+    "create_mcp_server",
 ]
