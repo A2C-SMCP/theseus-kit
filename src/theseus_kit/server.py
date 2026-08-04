@@ -49,13 +49,7 @@ def create_mcp_server(settings: TheseusSettings | None = None) -> FastMCP:
             auth=auth,
         )
 
-    return FastMCP(
-        name="theseus-kit",
-        instructions=(
-            "Inspect and manage TFRobot configuration. Read the exposed editing skills "
-            "and version-specific llms.txt documentation before mutating configuration."
-        ),
-    )
+    return FastMCP(name="theseus-kit", instructions=_INSTRUCTIONS)
 
 
 class _LazyOAuthTokenVerifier:
@@ -101,11 +95,4 @@ def _parse_space_separated(scopes: str) -> frozenset[str]:
 
 def main() -> None:
     """Run the MCP server over the portable stdio transport."""
-    mcp = FastMCP(
-        name="theseus-kit",
-        instructions=(
-            "Inspect and manage TFRobot configuration. Read the exposed editing skills "
-            "and version-specific llms.txt documentation before mutating configuration."
-        ),
-    )
-    mcp.run(transport="stdio")
+    create_mcp_server().run(transport="stdio")
