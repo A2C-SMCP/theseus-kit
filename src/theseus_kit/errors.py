@@ -71,6 +71,19 @@ class RobotApiError(TheseusError):
         super().__init__(message)
 
 
+class RobotValidationError(RobotApiError):
+    """The robot rejected the request body as invalid (HTTP 422).
+
+    Carries *validation_message* from TFRobotServer's ``msg`` field
+    (fell back to ``message`` if absent — the 422 handler uses ``msg``
+    instead of ``message``).
+    """
+
+    def __init__(self, message: str, *, status_code: int = 422, validation_message: str) -> None:
+        self.validation_message = validation_message
+        super().__init__(message, status_code=status_code)
+
+
 def map_exchange_error(exc: TfrsAuthError) -> TheseusError:
     """Map a tfrs-auth exchange/network error to a theseus-kit typed error.
 

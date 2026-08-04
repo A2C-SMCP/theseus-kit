@@ -51,6 +51,7 @@ class RobotResponse:
     status: int = 200
     body: bytes = b""
     content_type: str = "text/plain; charset=utf-8"
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -73,10 +74,19 @@ class _Handler(BaseHTTPRequestHandler):
         headers = {k.lower(): v for k, v in self.headers.items()}
         self._state.requests.append(RecordedRequest(method, self.path, headers, body))
 
-    def _send(self, status: int, body: bytes, content_type: str = "application/json") -> None:
+    def _send(
+        self,
+        status: int,
+        body: bytes,
+        content_type: str = "application/json",
+        extra_headers: dict[str, str] | None = None,
+    ) -> None:
         self.send_response(status)
         self.send_header("content-type", content_type)
         self.send_header("content-length", str(len(body)))
+        if extra_headers:
+            for name, value in extra_headers.items():
+                self.send_header(name, value)
         self.end_headers()
         if body:
             self.wfile.write(body)
@@ -87,8 +97,25 @@ class _Handler(BaseHTTPRequestHandler):
         self._record("POST", body)
         if self.path == TOKEN_PATH:
             self._handle_token()
-        else:
-            self._send(404, b'{"error":"not_found"}')
+            return
+        if not self._check_routing_headers():
+            return
+        resp = self._state.robot_responses.get(("POST", self._path_key()))
+        if resp is None:
+            resp = self._default_response(self._path_key())
+        self._send(resp.status, resp.body, resp.content_type, resp.headers)
+
+    def _check_routing_headers(self) -> bool:
+        """Check X-TF-* headers; return False (and send 400) if missing."""
+        if self._state.require_routing_headers:
+            missing = [h for h in ROUTING_HEADERS if h not in self.headers]
+            if missing:
+                self._send(
+                    400,
+                    json.dumps({"error": "missing routing context", "missing": missing}).encode(),
+                )
+                return False
+        return True
 
     def _handle_token(self) -> None:
         state = self._state.token
@@ -105,20 +132,38 @@ class _Handler(BaseHTTPRequestHandler):
         }
         self._send(200, json.dumps(payload).encode())
 
+    def _path_key(self) -> str:
+        """Return the path without query string for response lookup."""
+        return self.path.split("?")[0]
+
     def do_GET(self) -> None:
         self._record("GET", b"")
-        if self._state.require_routing_headers:
-            missing = [h for h in ROUTING_HEADERS if h not in self.headers]
-            if missing:
-                self._send(
-                    400,
-                    json.dumps({"error": "missing routing context", "missing": missing}).encode(),
-                )
-                return
-        resp = self._state.robot_responses.get(self.path)
+        if not self._check_routing_headers():
+            return
+        resp = self._state.robot_responses.get(self._path_key())
         if resp is None:
-            resp = self._default_response(self.path)
-        self._send(resp.status, resp.body, resp.content_type)
+            resp = self._default_response(self._path_key())
+        self._send(resp.status, resp.body, resp.content_type, resp.headers)
+
+    def do_PUT(self) -> None:
+        length = int(self.headers.get("content-length", "0") or "0")
+        body = self.rfile.read(length) if length else b""
+        self._record("PUT", body)
+        if not self._check_routing_headers():
+            return
+        resp = self._state.robot_responses.get(("PUT", self._path_key()))
+        if resp is None:
+            resp = self._default_response(self._path_key())
+        self._send(resp.status, resp.body, resp.content_type, resp.headers)
+
+    def do_DELETE(self) -> None:
+        self._record("DELETE", b"")
+        if not self._check_routing_headers():
+            return
+        resp = self._state.robot_responses.get(("DELETE", self._path_key()))
+        if resp is None:
+            resp = RobotResponse(204, b"")
+        self._send(resp.status, resp.body, resp.content_type, resp.headers)
 
     @staticmethod
     def _default_response(path: str) -> RobotResponse:
@@ -135,7 +180,7 @@ class FakeRobotServer:
     def __init__(self) -> None:
         self.requests: list[RecordedRequest] = []
         self.token = TokenState()
-        self.robot_responses: dict[str, RobotResponse] = {}
+        self.robot_responses: dict[str | tuple[str, str], RobotResponse] = {}
         self.require_routing_headers = True
         self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
         self._httpd.state = self  # type: ignore[attr-defined]

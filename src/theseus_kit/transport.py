@@ -21,14 +21,17 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator, Callable, Mapping
 from dataclasses import dataclass, field
+from typing import Any
 
 import httpx
+from pydantic import BaseModel
 from tfrs_auth import AsyncCachingTokenSource
 from tfrs_auth.client import Token
 from tfrs_auth.errors import TfrsAuthError
 
 from .config import RobotTarget, TheseusSettings
-from .errors import AuthRejectedError, RobotApiError, map_exchange_error
+from .errors import AuthRejectedError, RobotApiError, RobotValidationError, map_exchange_error
+from .models import PaginatedList, TFSResponse, parse_tfs_response
 from .redaction import redact_secrets
 from .routing import RequestContext
 from .tokens import build_token_source
@@ -36,6 +39,10 @@ from .tokens import build_token_source
 _FACTORY_DOCS_PREFIX = "/v1/factory/llm-docs/"
 
 _JWT_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:jwt"
+
+# HTTP statuses for which GET retry is safe (Issue #3: read-only retry gate).
+# 429 + 5xx are transient server-side conditions; all others are not retried.
+_RETRYABLE_STATUSES: frozenset[int] = frozenset({429} | set(range(500, 600)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,6 +229,101 @@ class RobotClient:
             ) from exc
         return self._ensure_ok(path, response)
 
+    # -- typed read helpers -------------------------------------------------
+
+    async def get_model(self, path: str, model_type: type[BaseModel]) -> Any:
+        """GET *path* and parse the response as ``TFSResponse[model_type]``.
+
+        Uses retry for transient failures (5xx / 429 / network).  The
+        returned object is a :class:`TFSResponse` whose ``data`` field is
+        an instance of *model_type*.
+        """
+
+        response = await self._request("GET", path, retry=True)
+        return parse_tfs_response(response, model_type)
+
+    async def get_paginated(
+        self,
+        path: str,
+        model_type: type[BaseModel],
+        *,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> TFSResponse:  # type: ignore[type-arg]
+        """GET *path* with pagination params; return ``TFSResponse[PaginatedList[model_type]]``.
+
+        *page* is 1-based (matching TFRobotServer's contract).  Uses retry.
+        """
+        response = await self._request("GET", path, params={"page": page, "pageSize": page_size}, retry=True)
+        body = response.json()
+        code: int = body.get("code", 0)
+        message: str = body.get("message", "")
+        if code != 200:
+            raise RobotApiError(f"robot returned code {code}: {message}", status_code=code)
+        raw_data: dict[str, Any] = body.get("data", {})
+        items = [model_type.model_validate(item) for item in raw_data.get("items", [])]
+        paginated: PaginatedList[Any] = PaginatedList(items=items, total=raw_data.get("total", 0))
+        return TFSResponse(code=code, message=message, data=paginated)
+
+    # -- write endpoints (no retry) -----------------------------------------
+
+    async def post(self, path: str, *, json: Any = None, data: Any = None, files: Any = None) -> httpx.Response:
+        """POST to *path*; no automatic retry (mutations are not idempotent)."""
+        return await self._request("POST", path, json=json, content=data, files=files, retry=False)
+
+    async def put(self, path: str, *, json: Any = None, data: Any = None) -> httpx.Response:
+        """PUT to *path*; no automatic retry."""
+        return await self._request("PUT", path, json=json, content=data, retry=False)
+
+    async def delete(self, path: str) -> httpx.Response:
+        """DELETE *path*; no automatic retry."""
+        return await self._request("DELETE", path, retry=False)
+
+    # -- internal -----------------------------------------------------------
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        retry: bool = False,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        """Issue an HTTP request, conditionally retrying on transient failures.
+
+        *retry* enables a single retry (2 total attempts) for 5xx / 429 /
+        network errors. 4xx (auth, validation, not-found) are never retried.
+        """
+        max_attempts = 2 if retry else 1
+        safe_path = redact_secrets(path)
+        last_error: Exception | None = None
+
+        for attempt in range(max_attempts):
+            try:
+                response = await self._client.request(method, path, **kwargs)
+            except httpx.HTTPError as exc:
+                last_error = exc
+                if not retry or attempt == max_attempts - 1:
+                    raise RobotApiError(
+                        f"robot request to {safe_path} failed before a response: {type(exc).__name__}",
+                        status_code=0,
+                    ) from exc
+                continue
+
+            try:
+                return self._ensure_ok(path, response)
+            except (AuthRejectedError, RobotValidationError):
+                raise  # never retry auth / validation failures
+            except RobotApiError as exc:
+                if not retry or attempt == max_attempts - 1 or exc.status_code not in _RETRYABLE_STATUSES:
+                    raise
+                last_error = exc
+
+        # Should be unreachable — the loop always raises or returns.
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("unreachable: _request loop fell through")
+
     async def get_llms_txt(self) -> str:
         """Fetch the robot's ``/llms.txt`` configuration documentation."""
         return (await self.get("/llms.txt")).text
@@ -246,9 +348,29 @@ class RobotClient:
                 f"robot rejected {safe_path} (HTTP {response.status_code}): "
                 "凭证无效或 scope 不足（只读访问需 config:read）。"
             )
+        if response.status_code == 422:
+            msg = RobotClient._extract_422_message(response)
+            raise RobotValidationError(
+                f"robot rejected {safe_path} (HTTP 422): {msg}",
+                status_code=422,
+                validation_message=msg,
+            )
         if response.status_code >= 400:
             raise RobotApiError(
                 f"robot {safe_path} returned HTTP {response.status_code}",
                 status_code=response.status_code,
             )
         return response
+
+    @staticmethod
+    def _extract_422_message(response: httpx.Response) -> str:
+        """Extract the validation message from a 422 TFRobotServer response.
+
+        TFRobotServer's 422 handler uses ``msg`` instead of ``message``
+        (an inconsistency in the codebase).  Fall back to ``message``.
+        """
+        try:
+            body = response.json()
+        except ValueError:
+            return ""
+        return str(body.get("msg") or body.get("message", ""))

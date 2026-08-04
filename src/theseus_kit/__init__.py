@@ -14,11 +14,13 @@ from theseus_kit.errors import (
     CredentialError,
     ExchangeUnavailableError,
     RobotApiError,
+    RobotValidationError,
     RoutingConfigError,
     ScopeOrAudienceError,
     SubscriptionFrozenError,
     TheseusError,
 )
+from theseus_kit.models import PaginatedList, TFSResponse
 from theseus_kit.oauth import TheseusTokenVerifier, build_token_verifier
 from theseus_kit.routing import RequestContext
 from theseus_kit.server import create_mcp_server
@@ -46,7 +48,10 @@ __all__ = [
     "ExchangeUnavailableError",
     "AuthRejectedError",
     "RobotApiError",
+    "RobotValidationError",
     "TheseusTokenVerifier",
     "build_token_verifier",
     "create_mcp_server",
+    "TFSResponse",
+    "PaginatedList",
 ]
