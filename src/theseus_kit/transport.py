@@ -5,6 +5,12 @@ This is theseus-kit's own routing Transport (architecture layer 3). tfrs-auth's
 must inject the three X-TF-* routing headers alongside the Bearer, which is a
 theseus-kit concern, not a generic auth one.
 
+Two token-source paths converge here (§8 of the OAuth design):
+
+* **PAT / client_credentials** → :class:`AsyncCachingTokenSource` (exchange +
+  cache + refresh, #17).
+* **OAuth** → :class:`StaticTokenSource` (pre-validated bearer, no exchange).
+
 Robot-side 401/403 surface as :class:`AuthRejectedError` (no silent refresh-
 retry: that needs an upstream ``AsyncCachingTokenSource.invalidate()``, tracked
 against tfrs-auth cnb#3). Token-exchange failures surface via
@@ -14,18 +20,55 @@ against tfrs-auth cnb#3). Token-exchange failures surface via
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator, Callable, Mapping
+from dataclasses import dataclass, field
 
 import httpx
 from tfrs_auth import AsyncCachingTokenSource
+from tfrs_auth.client import Token
 from tfrs_auth.errors import TfrsAuthError
 
-from .config import TheseusSettings
+from .config import RobotTarget, TheseusSettings
 from .errors import AuthRejectedError, RobotApiError, map_exchange_error
 from .redaction import redact_secrets
 from .routing import RequestContext
 from .tokens import build_token_source
 
 _FACTORY_DOCS_PREFIX = "/v1/factory/llm-docs/"
+
+_JWT_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:jwt"
+
+
+@dataclass(frozen=True, slots=True)
+class StaticTokenSource:
+    """Holds a pre-validated bearer token for the OAuth path.
+
+    Unlike :class:`AsyncCachingTokenSource`, this does **no** token exchange,
+    caching, or refresh. The token is validated upstream by
+    :class:`TheseusTokenVerifier` (S2) and forwarded directly to TFRobotServer
+    (§10.1-new: TFRobotServer natively accepts OAuth AS tokens).
+
+    The ``token()`` / ``aclose()`` interface mirrors ``AsyncCachingTokenSource``
+    so :class:`RobotAuth` and :class:`RobotClient` can accept either source
+    without branching.
+    """
+
+    access_token: str = field(repr=False)
+    token_type: str = "Bearer"
+    scope: str = ""
+    expires_at: float | None = None
+
+    async def token(self) -> Token:
+        """Return a synthetic :class:`Token` wrapping the static bearer."""
+        return Token(
+            access_token=self.access_token,
+            token_type=self.token_type,
+            scope=self.scope,
+            issued_token_type=_JWT_TOKEN_TYPE,
+            expires_at=self.expires_at if self.expires_at is not None else float("inf"),
+        )
+
+    async def aclose(self) -> None:
+        """No-op — no HTTP client to close (cf. ``AsyncCachingTokenSource.aclose``)."""
 
 
 class RobotAuth(httpx.Auth):
@@ -37,7 +80,11 @@ class RobotAuth(httpx.Auth):
     surfaces as a typed error instead of propagating raw.
     """
 
-    def __init__(self, token_source: AsyncCachingTokenSource, context: RequestContext) -> None:
+    def __init__(
+        self,
+        token_source: AsyncCachingTokenSource | StaticTokenSource,
+        context: RequestContext,
+    ) -> None:
         self._token_source = token_source
         self._context = context
 
@@ -63,7 +110,7 @@ class RobotClient:
 
     def __init__(
         self,
-        token_source: AsyncCachingTokenSource,
+        token_source: AsyncCachingTokenSource | StaticTokenSource,
         context: RequestContext,
         *,
         api_base_url: str,
@@ -112,6 +159,38 @@ class RobotClient:
             api_base_url=settings.robot.api_base_url,
             verify=verify,
             timeout_s=settings.robot.timeout_s,
+        )
+
+    @classmethod
+    def for_static_token(
+        cls,
+        token: str,
+        *,
+        robot: RobotTarget,
+        scope: str = "",
+    ) -> RobotClient:
+        """Build a client that forwards a pre-validated OAuth AS token.
+
+        The *token* is the raw RS256 JWT validated by
+        :class:`TheseusTokenVerifier` (S2). It is held in a
+        :class:`StaticTokenSource` and injected as a Bearer alongside X-TF-*
+        routing headers — no token exchange, caching, or refresh.
+
+        *robot* provides the routing identity (X-TF-*) and the API base URL.
+        """
+        source = StaticTokenSource(access_token=token, scope=scope)
+        context = RequestContext(
+            robot_id=robot.robot_id,
+            namespace=robot.namespace,
+            robot_type=robot.robot_type,
+        )
+        verify: bool | str = str(robot.ca_bundle) if robot.ca_bundle else robot.verify
+        return cls(
+            source,
+            context,
+            api_base_url=robot.api_base_url,
+            verify=verify,
+            timeout_s=robot.timeout_s,
         )
 
     async def aclose(self) -> None:
