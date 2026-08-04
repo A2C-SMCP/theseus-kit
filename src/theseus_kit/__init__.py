@@ -3,6 +3,7 @@
 from theseus_kit.config import (
     ClientCredentialsConfig,
     CredentialConfig,
+    OAuthConfig,
     RobotTarget,
     TheseusSettings,
     UserPatConfig,
@@ -29,6 +30,7 @@ __all__ = [
     "RobotTarget",
     "CredentialConfig",
     "ClientCredentialsConfig",
+    "OAuthConfig",
     "UserPatConfig",
     "RequestContext",
     "RobotClient",

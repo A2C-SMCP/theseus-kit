@@ -12,7 +12,7 @@ from collections.abc import Sequence
 
 from tfrs_auth import ClientCredentials, PatCredential, Scope, robot_audience, scopes_to_str
 
-from .config import ClientCredentialsConfig, CredentialConfig, UserPatConfig
+from .config import ClientCredentialsConfig, CredentialConfig, OAuthConfig, UserPatConfig
 from .errors import ConfigError
 
 
@@ -58,6 +58,13 @@ def build_credential(
             audience=robot_audience(org_slug, employee_no),
             scope=scopes_to_str(scopes),
         )
+    if isinstance(cred, OAuthConfig):
+        raise ConfigError(
+            "OAuth credentials bypass the token exchange pipeline. "
+            "The OAuth path uses a static bearer token held by the MCP Client "
+            "and injected by RobotClient — no AsyncCachingTokenSource is needed. "
+            "Use the OAuth static bearer path instead of build_credential() / build_token_source()."
+        )
     # Closed discriminated union — fail explicitly if a new kind is added without
     # wiring it here (decouples runtime validation from mypy type narrowing).
-    raise ConfigError(f"unsupported credential kind: {cred!r}")
+    raise ConfigError(f"unsupported credential kind: {cred!r}")  # pyright: ignore[reportUnreachable]

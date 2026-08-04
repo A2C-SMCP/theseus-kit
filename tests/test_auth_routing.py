@@ -18,8 +18,10 @@ from pydantic import SecretStr, ValidationError
 from theseus_kit import (
     AuthRejectedError,
     ClientCredentialsConfig,
+    ConfigError,
     CredentialError,
     ExchangeUnavailableError,
+    OAuthConfig,
     RequestContext,
     RobotApiError,
     RobotClient,
@@ -304,6 +306,162 @@ def test_config_rejects_missing_ca_bundle() -> None:
             manager_base_url="https://mgr.example.com",
             ca_bundle=Path("/does/not/exist"),
         )
+
+
+# --- OAuthConfig -------------------------------------------------------------
+
+
+class TestOAuthConfigDefaults:
+    def test_default_scope_is_config_read(self) -> None:
+        cfg = OAuthConfig(authorization_server="https://auth.example.com")
+        assert cfg.scopes == "config:read"
+
+    def test_client_id_defaults_to_none(self) -> None:
+        cfg = OAuthConfig(authorization_server="https://auth.example.com")
+        assert cfg.client_id is None
+
+    def test_redirect_uri_defaults_to_none(self) -> None:
+        cfg = OAuthConfig(authorization_server="https://auth.example.com")
+        assert cfg.redirect_uri is None
+
+    def test_kind_is_oauth(self) -> None:
+        cfg = OAuthConfig(authorization_server="https://auth.example.com")
+        assert cfg.kind == "oauth"
+
+
+class TestOAuthConfigValidation:
+    def test_rejects_bare_hostname(self) -> None:
+        with pytest.raises(ValidationError, match="must start with http:// or https://"):
+            OAuthConfig(authorization_server="auth.example.com")
+
+    def test_accepts_https_url(self) -> None:
+        cfg = OAuthConfig(authorization_server="https://auth.example.com")
+        assert cfg.authorization_server == "https://auth.example.com"
+
+    def test_accepts_http_url(self) -> None:
+        cfg = OAuthConfig(authorization_server="http://localhost:8080")
+        assert cfg.authorization_server == "http://localhost:8080"
+
+    def test_rejects_bad_redirect_uri(self) -> None:
+        with pytest.raises(ValidationError, match="redirect_uri must start with http:// or https://"):
+            OAuthConfig(authorization_server="https://auth.example.com", redirect_uri="oob")
+
+    def test_allows_null_redirect_uri(self) -> None:
+        cfg = OAuthConfig(authorization_server="https://auth.example.com", redirect_uri=None)
+        assert cfg.redirect_uri is None
+
+    def test_all_optional_fields_explicit(self) -> None:
+        cfg = OAuthConfig(
+            authorization_server="https://auth.example.com",
+            scopes="config:read config:write",
+            client_id="pre-registered-client-123",
+            redirect_uri="http://127.0.0.1:12345/callback",
+        )
+        assert cfg.scopes == "config:read config:write"
+        assert cfg.client_id == "pre-registered-client-123"
+        assert cfg.redirect_uri == "http://127.0.0.1:12345/callback"
+
+
+class TestOAuthConfigEnvLoading:
+    def test_oauth_kind_loads_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        env = {
+            "THESEUS_ROBOT__ROBOT_ID": "robot-1",
+            "THESEUS_ROBOT__NAMESPACE": "default",
+            "THESEUS_ROBOT__ROBOT_TYPE": "tfrobot",
+            "THESEUS_ROBOT__API_BASE_URL": "https://api.example.com",
+            "THESEUS_ROBOT__MANAGER_BASE_URL": "https://mgr.example.com",
+            "THESEUS_CREDENTIAL__KIND": "oauth",
+            "THESEUS_CREDENTIAL__AUTHORIZATION_SERVER": "https://auth.example.com",
+        }
+        for key in env:
+            monkeypatch.setenv(key, env[key])
+        # Also clear any PAT / client_credentials env that might linger.
+        for stale in ["THESEUS_CREDENTIAL__MACHINE_CLIENT_ID", "THESEUS_CREDENTIAL__MACHINE_CLIENT_SECRET",
+                       "THESEUS_CREDENTIAL__PAT", "THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID"]:
+            monkeypatch.delenv(stale, raising=False)
+        settings = TheseusSettings()
+        assert isinstance(settings.credential, OAuthConfig)
+        assert settings.credential.kind == "oauth"
+        assert settings.credential.authorization_server == "https://auth.example.com"
+        assert settings.credential.scopes == "config:read"  # default
+
+    def test_oauth_kind_with_optional_fields_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        env = {
+            "THESEUS_ROBOT__ROBOT_ID": "robot-1",
+            "THESEUS_ROBOT__NAMESPACE": "default",
+            "THESEUS_ROBOT__ROBOT_TYPE": "tfrobot",
+            "THESEUS_ROBOT__API_BASE_URL": "https://api.example.com",
+            "THESEUS_ROBOT__MANAGER_BASE_URL": "https://mgr.example.com",
+            "THESEUS_CREDENTIAL__KIND": "oauth",
+            "THESEUS_CREDENTIAL__AUTHORIZATION_SERVER": "https://auth.example.com",
+            "THESEUS_CREDENTIAL__SCOPES": "config:read config:write",
+            "THESEUS_CREDENTIAL__CLIENT_ID": "pre-registered-client",
+            "THESEUS_CREDENTIAL__REDIRECT_URI": "http://127.0.0.1:12345/callback",
+        }
+        for key in env:
+            monkeypatch.setenv(key, env[key])
+        settings = TheseusSettings()
+        assert isinstance(settings.credential, OAuthConfig)
+        assert settings.credential.scopes == "config:read config:write"
+        assert settings.credential.client_id == "pre-registered-client"
+        assert settings.credential.redirect_uri == "http://127.0.0.1:12345/callback"
+
+
+class TestOAuthConfigDiscrimination:
+    """Credential choice invariant: PAT/client_credentials first, OAuth only when no
+    explicit credential is configured."""
+
+    def test_kind_oauth_produces_oauth_config_not_client_credentials(self) -> None:
+        """The discriminated union routes kind=oauth to OAuthConfig, not the others."""
+        settings = TheseusSettings(
+            robot=dict(
+                robot_id="robot-1",
+                namespace="default",
+                robot_type="tfrobot",
+                api_base_url="https://api.example.com",
+                manager_base_url="https://mgr.example.com",
+            ),
+            credential=dict(
+                kind="oauth",
+                authorization_server="https://auth.example.com",
+            ),
+        )
+        assert isinstance(settings.credential, OAuthConfig)
+        assert not isinstance(settings.credential, ClientCredentialsConfig)
+        assert not isinstance(settings.credential, UserPatConfig)
+
+    def test_kind_client_credentials_still_works(self) -> None:
+        """Existing client_credentials path is unaffected by the new oauth kind."""
+        settings = TheseusSettings(
+            robot=dict(
+                robot_id="robot-1",
+                namespace="default",
+                robot_type="tfrobot",
+                api_base_url="https://api.example.com",
+                manager_base_url="https://mgr.example.com",
+            ),
+            credential=dict(
+                kind="client_credentials",
+                machine_client_id="turingfocus:000042",
+                machine_client_secret="tfp_secret",
+            ),
+        )
+        assert isinstance(settings.credential, ClientCredentialsConfig)
+
+    def test_missing_authorization_server_rejected(self) -> None:
+        """OAuthConfig without authorization_server is incomplete → ValidationError."""
+        with pytest.raises(ValidationError):
+            OAuthConfig()  # type: ignore[call-arg]
+
+
+class TestBuildCredentialRejectsOAuth:
+    def test_build_credential_raises_config_error_for_oauth(self) -> None:
+        """OAuth tokens don't go through the exchange pipeline."""
+        from theseus_kit.credentials import build_credential
+
+        cfg = OAuthConfig(authorization_server="https://auth.example.com")
+        with pytest.raises(ConfigError, match="OAuth credentials bypass the token exchange pipeline"):
+            build_credential(cfg)
 
 
 # --- exchange-error mapping (remaining branches) -----------------------------

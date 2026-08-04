@@ -86,7 +86,54 @@ class UserPatConfig(BaseModel):
     )
 
 
-CredentialConfig = Annotated[ClientCredentialsConfig | UserPatConfig, Field(discriminator="kind")]
+class OAuthConfig(BaseModel):
+    """OAuth 2.0 / 2.1 authorization (MCP-standard, no PAT).
+
+    When no explicit PAT or ``client_credentials`` is configured, theseus-kit
+    acts as an OAuth Protected Resource (RS): the MCP Client drives the
+    authorization-code + PKCE flow against the TFRSManager AS, and theseus-kit
+    validates the resulting Bearer token then forwards it directly to the target
+    TFRobotServer (no token exchange — TFRobotServer natively accepts OAuth AS
+    tokens per §10.1-new of the OAuth design).
+
+    .. seealso:: :ref:`docs/auth-oauth-design.md` §4, §5.
+    """
+
+    kind: Literal["oauth"] = "oauth"
+    authorization_server: str = Field(
+        description="TFRSManager OAuth AS base URL（用于 PRM 发现 + Bearer 校验的 JWKS 获取）",
+    )
+    scopes: str = Field(
+        default="config:read",
+        description="Space-separated scope string（与 PAT 路径默认值一致）",
+    )
+    client_id: str | None = Field(
+        default=None,
+        description="预注册 client_id；None 时走 DCR / CIMD（MCP SDK 处理）",
+    )
+    redirect_uri: str | None = Field(
+        default=None,
+        description="STDIO 外部回调 URI（Topology B）；Topology A（HTTP/MCP Client）不需要",
+    )
+
+    @field_validator("authorization_server")
+    @classmethod
+    def _validate_authorization_server_url(cls, value: str) -> str:
+        if not value.startswith(("http://", "https://")):
+            raise ValueError(f"authorization_server must start with http:// or https://; got {value!r}")
+        return value
+
+    @field_validator("redirect_uri")
+    @classmethod
+    def _validate_redirect_uri_url(cls, value: str | None) -> str | None:
+        if value is not None and not value.startswith(("http://", "https://")):
+            raise ValueError(f"redirect_uri must start with http:// or https://; got {value!r}")
+        return value
+
+
+CredentialConfig = Annotated[
+    ClientCredentialsConfig | UserPatConfig | OAuthConfig, Field(discriminator="kind")
+]
 
 
 class TheseusSettings(BaseSettings):
