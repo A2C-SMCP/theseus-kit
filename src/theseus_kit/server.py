@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from mcp.server.auth.provider import AccessToken
@@ -32,6 +33,35 @@ _INSTRUCTIONS = (
 )
 
 _WINDOW_NS = "window://com.a2c-smcp.theseus-kit"
+_SKILL_NS = "skill://com.a2c-smcp.theseus-kit"
+
+_SKILL_NAMES = (
+    "inspect-robot-config",
+    "edit-robot-draft",
+    "publish-robot-config",
+)
+
+_SKILL_DESCRIPTIONS: dict[str, str] = {
+    "inspect-robot-config": (
+        "How to explore and read TFRobot configuration: discover what"
+        " exists with get_config_summary, navigate the tree with"
+        " list_config_nodes, read bounded details with get_config_detail,"
+        " and consult runtime llms.txt schema documentation."
+    ),
+    "edit-robot-draft": (
+        "How to safely modify a draft configuration: read the robot's"
+        " runtime llms.txt schema first, check the current node with"
+        " get_config_detail, form safe modifications, call update_draft"
+        " with expected_hash for optimistic concurrency control, handle"
+        " validation errors, and verify results."
+    ),
+    "publish-robot-config": (
+        "How to publish draft configuration to production: run pre-checks"
+        " with get_config_summary, confirm the explicit acknowledge_publish"
+        " approval boundary, call publish_config with expected_root_hash,"
+        " and verify the online state updated."
+    ),
+}
 
 
 def _register_resources(mcp: FastMCP, settings: TheseusSettings) -> None:
@@ -69,6 +99,30 @@ def _register_resources(mcp: FastMCP, settings: TheseusSettings) -> None:
     async def config_recent_detail() -> dict[str, Any]:
         async with RobotClient.from_settings(settings) as client:
             return await build_recent(client, robot_id)
+
+
+def _register_skill_resources(mcp: FastMCP) -> None:
+    """Register the three ``skill://`` resources on *mcp*."""
+    from .skills import build_skill_resource
+
+    for skill_name in _SKILL_NAMES:
+
+        def _make_handler(name: str = skill_name) -> Callable[[], str]:
+            def _reader() -> str:
+                return build_skill_resource(name)
+
+            return _reader
+
+        handler = _make_handler()
+
+        mcp.resource(
+            f"{_SKILL_NS}/{skill_name}",
+            name=f"Skill: {skill_name}",
+            description=_SKILL_DESCRIPTIONS[skill_name],
+            mime_type="text/markdown",
+            annotations=Annotations(audience=["assistant"], priority=0.7),
+            meta={"source": "resources"},
+        )(handler)
 
 
 def create_mcp_server(settings: TheseusSettings | None = None) -> FastMCP:
@@ -111,6 +165,7 @@ def create_mcp_server(settings: TheseusSettings | None = None) -> FastMCP:
     if settings is not None:
         _register_tools(mcp, settings)
         _register_resources(mcp, settings)
+        _register_skill_resources(mcp)
 
     return mcp
 
