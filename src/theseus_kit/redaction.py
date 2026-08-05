@@ -84,3 +84,67 @@ def redact_secrets(text: str) -> str:
     for pattern in _SECRET_RES:
         redacted = pattern.sub(REDACTED, redacted)
     return redacted
+
+
+# ---------------------------------------------------------------------------
+# Sensitive-field redaction for progressive-disclosure read surfaces
+# ---------------------------------------------------------------------------
+
+# Keys matched case-insensitively by substring (see progressive-disclosure.md
+# § "Sensitive-field redaction").  Applied recursively to nested dicts/lists.
+_SENSITIVE_KEY_SUBSTRINGS: tuple[str, ...] = (
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "credential",
+    "api_key",
+    "apikey",
+    "access_key",
+    "private_key",
+    "client_secret",
+    "refresh_token",
+    "pat",
+    "bearer",
+    "authorization",
+)
+
+
+def _is_sensitive_key(key: str) -> bool:
+    """Return ``True`` when *key* matches a known sensitive-field pattern."""
+    lower = key.lower()
+    return any(pat in lower for pat in _SENSITIVE_KEY_SUBSTRINGS)
+
+
+def redact_sensitive_fields(obj: object) -> tuple[object, list[str]]:
+    """Recursively redact sensitive fields in *obj*.
+
+    Returns ``(redacted_obj, redacted_paths)`` where *redacted_paths* is a
+    list of RFC 6901 JSON Pointer strings identifying every redacted location.
+    Only the **paths** are recorded — values are never accumulated.
+    """
+
+    redacted_paths: list[str] = []
+
+    def _walk(current: object, pointer: str) -> object:
+        if isinstance(current, dict):
+            result: dict[str, object] = {}
+            for k, v in current.items():
+                child_ptr = f"{pointer}/{_escape_json_pointer(k)}"
+                if _is_sensitive_key(k):
+                    redacted_paths.append(child_ptr)
+                    result[k] = REDACTED
+                else:
+                    result[k] = _walk(v, child_ptr)
+            return result
+        if isinstance(current, list):
+            return [_walk(item, f"{pointer}/{i}") for i, item in enumerate(current)]
+        return current
+
+    redacted_obj = _walk(obj, "")
+    return redacted_obj, redacted_paths
+
+
+def _escape_json_pointer(segment: str) -> str:
+    """Escape *segment* for use as an RFC 6901 JSON Pointer token."""
+    return segment.replace("~", "~0").replace("/", "~1")

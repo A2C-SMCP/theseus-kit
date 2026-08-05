@@ -71,6 +71,10 @@ class RobotApiError(TheseusError):
         super().__init__(message)
 
 
+class ConfigLocatorError(TheseusError):
+    """The supplied locator string is malformed or references an unknown state."""
+
+
 class RobotValidationError(RobotApiError):
     """The robot rejected the request body as invalid (HTTP 422).
 

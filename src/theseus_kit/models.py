@@ -1,19 +1,25 @@
-"""Typed response models for the TFRobotServer API.
+"""Typed response models for the TFRobotServer API and progressive-disclosure tools.
 
 Mirrors the wire contract of TFRobotServer's ``dtos/global_dto.py`` —
 ``TFSResponse[T]`` wrapping ``{code, message, data}`` and
 ``PaginatedList[T]`` for endpoints that return ``{items, total}``.
 
-These models insulate upper layers from ``httpx.Response`` (Issue #3
-acceptance criterion); Application Services work with typed pydantic
-models instead of raw JSON / HTTP responses.
+The progressive-disclosure models (Issue #4) define the four-tool read
+surface freeze-dried in ``docs/progressive-disclosure.md``: ``ConfigSummary``,
+``ListNodesResponse``, ``ConfigDetail``, and ``TemplateResponse``, plus the
+``CursorData`` helper for stateless pagination.
 """
 
 from __future__ import annotations
 
-from typing import Any, Generic, TypeVar
+import base64
+import json as _json
+from dataclasses import dataclass
+from dataclasses import field as dc_field
+from enum import StrEnum
+from typing import Any, Generic, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 T = TypeVar("T")
 
@@ -98,4 +104,191 @@ def parse_tfs_response(
         code=code,
         message=message,
         data=parsed_data,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Progressive-disclosure tool response models (Issue #4)
+# ---------------------------------------------------------------------------
+
+
+class NodeKind(StrEnum):
+    """Kinds of node in the three-state configuration forest."""
+
+    STATE = "state"
+    SCENE = "scene"
+    FACTORY = "factory"
+    SETTING = "setting"
+
+
+class ResponseMeta(BaseModel):
+    """Carried on every progressive-disclosure response (``_meta``)."""
+
+    revision: str | None = None
+    fetched_at: str
+
+
+class ListMeta(ResponseMeta):
+    """``_meta`` extension for ``list_config_nodes`` (adds ``filters``)."""
+
+    filters: dict[str, str] = Field(default_factory=dict)
+
+
+# -- get_config_summary ----------------------------------------------------
+
+
+class StateSummary(BaseModel):
+    """One lifecycle state's availability overview."""
+
+    present: bool
+    root_locator: str
+    status: Literal["clean", "dirty", "publishing", "unknown"] | None = None
+    count: int | None = None
+    revision: str | None = None
+    last_modified: str | None = None
+
+
+class RobotIdentity(BaseModel):
+    """Minimal robot identity for the summary response."""
+
+    robot_id: str
+    display_name: str | None = None
+    server_version: str | None = None
+
+
+class ConfigSummary(BaseModel):
+    """``get_config_summary`` response — entry point for an LLM that does
+    not yet know what exists.
+    """
+
+    robot_identity: RobotIdentity
+    states: dict[str, StateSummary] = Field(default_factory=dict)
+    meta: ResponseMeta = Field(alias="_meta")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+# -- list_config_nodes -----------------------------------------------------
+
+
+class ListNode(BaseModel):
+    """One node in a ``list_config_nodes`` response page."""
+
+    locator: str
+    state: str
+    kind: NodeKind
+    name: str | None = None
+    size_bytes: int | None = None
+    revision: str | None = None
+
+
+class ListNodesResponse(BaseModel):
+    """``list_config_nodes`` response — paginated children of a forest node."""
+
+    nodes: list[ListNode] = Field(default_factory=list)
+    next_cursor: str | None = None
+    drift: bool = False
+    meta: ListMeta = Field(alias="_meta")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+# -- get_config_detail -----------------------------------------------------
+
+
+class ConfigDetail(BaseModel):
+    """``get_config_detail`` response — bounded, redacted subtree of a node."""
+
+    locator: str
+    state: str
+    revision: str | None = None
+    subtree: Any = {}
+    truncated: bool = False
+    truncated_at: str | None = None
+    bytes_returned: int = 0
+    bytes_estimated_total: int | None = None
+    redacted: list[str] = Field(default_factory=list)
+    next_actions: list[dict[str, Any]] | None = None
+    meta: ResponseMeta = Field(alias="_meta")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+# -- get_template ----------------------------------------------------------
+
+
+class TemplateResponse(BaseModel):
+    """``get_template`` response.
+
+    When ``metadata_only=True`` the detail fields (``subtree``, ``truncated``,
+    …) are absent; when ``False`` this carries the same shape as
+    :class:`ConfigDetail` with ``locator := tcfg:template/<template_id>``.
+    """
+
+    template_id: str
+    name: str | None = None
+    lifecycle: str = "template"
+    size_bytes: int | None = None
+    root_locator: str = ""
+    # detail fields (metadata_only=False only)
+    state: str = "template"
+    revision: str | None = None
+    subtree: Any = {}
+    truncated: bool = False
+    truncated_at: str | None = None
+    bytes_returned: int = 0
+    bytes_estimated_total: int | None = None
+    redacted: list[str] = Field(default_factory=list)
+    next_actions: list[dict[str, Any]] | None = None
+    meta: ResponseMeta = Field(alias="_meta")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+# -- Cursor (stateless pagination for list_config_nodes) -------------------
+
+
+@dataclass
+class CursorData:
+    """Decoded content of an opaque ``next_cursor`` token.
+
+    Encoded as base64url JSON with abbreviated keys to keep the token compact.
+    """
+
+    parent: str
+    state: str
+    filters: dict[str, str] = dc_field(default_factory=dict)
+    offset: int = 0
+    revision_at_issue: str = ""
+
+    _KEYS = ("p", "s", "f", "o", "r")
+
+
+def encode_cursor(data: CursorData) -> str:
+    """Encode *data* as an opaque base64url cursor token."""
+    payload = {
+        "p": data.parent,
+        "s": data.state,
+        "f": data.filters,
+        "o": data.offset,
+        "r": data.revision_at_issue,
+    }
+    raw = _json.dumps(payload, separators=(",", ":"), sort_keys=True)
+    return base64.urlsafe_b64encode(raw.encode()).rstrip(b"=").decode()
+
+
+def decode_cursor(token: str) -> CursorData:
+    """Decode a base64url cursor token back to :class:`CursorData`."""
+    # Restore padding stripped by urlsafe_b64encode.
+    missing = 4 - len(token) % 4
+    if missing != 4:
+        token += "=" * missing
+    raw = base64.urlsafe_b64decode(token).decode()
+    d: dict[str, Any] = _json.loads(raw)
+    return CursorData(
+        parent=d.get("p", ""),
+        state=d.get("s", ""),
+        filters=d.get("f", {}),
+        offset=d.get("o", 0),
+        revision_at_issue=d.get("r", ""),
     )
