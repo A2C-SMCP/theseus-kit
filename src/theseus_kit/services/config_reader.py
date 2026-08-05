@@ -34,6 +34,7 @@ from theseus_kit.models import (
     RobotIdentity,
     StateSummary,
     TemplateResponse,
+    compute_config_hash,
     decode_cursor,
     encode_cursor,
 )
@@ -750,6 +751,10 @@ class ConfigReader:
         # secrets collapses to "<<redacted>>" and never overflows the budget).
         redacted_obj, redacted_paths = redact_sensitive_fields(target)
 
+        # Compute content hash of the original config (before redaction/bounding)
+        # so the caller can use it for optimistic concurrency in update_draft.
+        config_hash = compute_config_hash(config)
+
         # Apply depth + max_bytes bounding on the redacted object.
         bounds = _bound_subtree(redacted_obj, depth=depth, max_bytes=max_bytes)
 
@@ -767,6 +772,7 @@ class ConfigReader:
             bytes_estimated_total=bytes_estimated_total,
             redacted=redacted_paths,
             next_actions=bounds.get("next_actions"),
+            content_hash=config_hash,
             **{"_meta": ResponseMeta(fetched_at=now)},
         )
 
@@ -837,6 +843,7 @@ class ConfigReader:
             bytes_estimated_total=bounds["bytes_estimated_total"] if bounds["truncated"] else None,
             redacted=redacted_paths,
             next_actions=bounds.get("next_actions"),
+            content_hash=compute_config_hash(config),
             meta=ResponseMeta(fetched_at=now),
         )
 

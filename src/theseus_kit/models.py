@@ -13,6 +13,7 @@ surface freeze-dried in ``docs/progressive-disclosure.md``: ``ConfigSummary``,
 from __future__ import annotations
 
 import base64
+import hashlib
 import json as _json
 from dataclasses import dataclass
 from dataclasses import field as dc_field
@@ -209,6 +210,7 @@ class ConfigDetail(BaseModel):
     bytes_estimated_total: int | None = None
     redacted: list[str] = Field(default_factory=list)
     next_actions: list[dict[str, Any]] | None = None
+    content_hash: str | None = None
     meta: ResponseMeta = Field(alias="_meta")
 
     model_config = ConfigDict(populate_by_name=True)
@@ -240,6 +242,7 @@ class TemplateResponse(BaseModel):
     bytes_estimated_total: int | None = None
     redacted: list[str] = Field(default_factory=list)
     next_actions: list[dict[str, Any]] | None = None
+    content_hash: str | None = None
     meta: ResponseMeta = Field(alias="_meta")
 
     model_config = ConfigDict(populate_by_name=True)
@@ -314,3 +317,42 @@ class LlmsDoc(BaseModel):
     meta: ResponseMeta = Field(alias="_meta")
 
     model_config = ConfigDict(populate_by_name=True)
+
+
+# -- update_draft ------------------------------------------------------------
+
+
+class UpdateDraftResponse(BaseModel):
+    """``update_draft`` response — updated draft with content hash for optimistic concurrency.
+
+    The *content_hash* is a SHA-256 digest of the deterministic JSON
+    serialization of *config* (sorted keys, compact separators).  Pass it
+    as ``expected_hash`` on the next ``update_draft`` call to detect
+    intervening modifications by another actor.
+    """
+
+    locator: str = ""
+    setting_id: int = 0
+    setting_name: str = ""
+    scene: str = ""
+    config: dict[str, Any] = Field(default_factory=dict)
+    content_hash: str = ""
+    revision: str | None = None
+    meta: ResponseMeta = Field(alias="_meta")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+# -- Hash utility -----------------------------------------------------------
+
+
+def compute_config_hash(config: dict[str, Any]) -> str:
+    """Compute a deterministic SHA-256 hash of a config dictionary.
+
+    The hash is stable regardless of key ordering — the dict is serialized
+    with ``sort_keys=True`` and compact separators before hashing.
+
+    Returns a 64-character lowercase hex string.
+    """
+    canonical = _json.dumps(config, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode()).hexdigest()

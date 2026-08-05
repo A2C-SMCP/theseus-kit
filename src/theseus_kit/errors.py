@@ -79,6 +79,22 @@ class LlmsDocError(TheseusError):
     """The requested llms.txt document path is invalid or forbidden."""
 
 
+class DraftNotFoundError(TheseusError):
+    """The requested draft setting_id does not exist (HTTP 404)."""
+
+
+class DraftConflictError(TheseusError):
+    """The draft was modified by another actor since it was read.
+
+    Carries *current_hash* so the caller can re-read and retry with the
+    latest content hash.
+    """
+
+    def __init__(self, message: str, *, current_hash: str) -> None:
+        self.current_hash = current_hash
+        super().__init__(message)
+
+
 class RobotValidationError(RobotApiError):
     """The robot rejected the request body as invalid (HTTP 422).
 

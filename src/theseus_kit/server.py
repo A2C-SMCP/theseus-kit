@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from mcp.server.auth.provider import AccessToken
 from mcp.server.auth.settings import AuthSettings
@@ -17,6 +17,7 @@ from .models import (
     ListNodesResponse,
     LlmsDoc,
     TemplateResponse,
+    UpdateDraftResponse,
 )
 
 if TYPE_CHECKING:
@@ -77,6 +78,7 @@ def create_mcp_server(settings: TheseusSettings | None = None) -> FastMCP:
 def _register_tools(mcp: FastMCP, settings: TheseusSettings) -> None:
     """Register the four progressive-disclosure read tools on *mcp*."""
     from .services.config_reader import ConfigReader
+    from .services.draft_editor import DraftEditor
     from .services.llms_doc_reader import LlmsDocReader
     from .transport import RobotClient
 
@@ -207,6 +209,37 @@ def _register_tools(mcp: FastMCP, settings: TheseusSettings) -> None:
         reader = LlmsDocReader()
         async with RobotClient.from_settings(settings) as client:
             return await reader.get_doc(client, path=path, max_bytes=max_bytes)
+
+    @mcp.tool(
+        name="update_draft",
+        description=(
+            "Update an existing draft configuration setting."
+            " Use this AFTER reading the draft with get_config_detail — pass"
+            " its content_hash as expected_hash to protect against conflicting"
+            " changes by another actor.  If another actor modified the draft"
+            " since you read it, the call fails with a conflict error so you"
+            " can re-read and retry.  Omit expected_hash to skip the conflict"
+            " check (last-write-wins)."
+            " Returns the updated draft with a new content_hash for the next"
+            " update.  This tool NEVER publishes the draft; it only modifies"
+            " the stored configuration.  Requires config:write scope."
+        ),
+    )
+    async def update_draft(
+        setting_id: int,
+        setting_name: str,
+        config: dict[str, Any],
+        expected_hash: str | None = None,
+    ) -> UpdateDraftResponse:
+        editor = DraftEditor(robot_id=robot_id)
+        async with RobotClient.from_settings(settings) as client:
+            return await editor.update_draft(
+                client,
+                setting_id=setting_id,
+                setting_name=setting_name,
+                config=config,
+                expected_hash=expected_hash,
+            )
 
 
 class _LazyOAuthTokenVerifier:

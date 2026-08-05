@@ -13,6 +13,8 @@ from theseus_kit.errors import (
     ConfigError,
     ConfigLocatorError,
     CredentialError,
+    DraftConflictError,
+    DraftNotFoundError,
     ExchangeUnavailableError,
     LlmsDocError,
     RobotApiError,
@@ -34,11 +36,13 @@ from theseus_kit.models import (
     StateSummary,
     TemplateResponse,
     TFSResponse,
+    UpdateDraftResponse,
+    compute_config_hash,
 )
 from theseus_kit.oauth import TheseusTokenVerifier, build_token_verifier
 from theseus_kit.routing import RequestContext
 from theseus_kit.server import create_mcp_server
-from theseus_kit.services import ConfigReader, LlmsDocReader
+from theseus_kit.services import ConfigReader, DraftEditor, LlmsDocReader
 from theseus_kit.transport import RobotClient, StaticTokenSource
 
 __version__ = "0.1.0.dev0"
@@ -57,6 +61,8 @@ __all__ = [
     "TheseusError",
     "ConfigError",
     "ConfigLocatorError",
+    "DraftConflictError",
+    "DraftNotFoundError",
     "LlmsDocError",
     "RoutingConfigError",
     "CredentialError",
@@ -70,6 +76,7 @@ __all__ = [
     "build_token_verifier",
     "create_mcp_server",
     "ConfigReader",
+    "DraftEditor",
     "LlmsDocReader",
     "ConfigSummary",
     "StateSummary",
@@ -82,4 +89,6 @@ __all__ = [
     "CursorData",
     "TFSResponse",
     "PaginatedList",
+    "UpdateDraftResponse",
+    "compute_config_hash",
 ]
