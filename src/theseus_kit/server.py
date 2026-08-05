@@ -17,6 +17,7 @@ from .models import (
     ListNodesResponse,
     LlmsDoc,
     PublishConfigResponse,
+    SaveTemplateResponse,
     TemplateResponse,
     UpdateDraftResponse,
 )
@@ -82,6 +83,7 @@ def _register_tools(mcp: FastMCP, settings: TheseusSettings) -> None:
     from .services.draft_editor import DraftEditor
     from .services.llms_doc_reader import LlmsDocReader
     from .services.publisher import ConfigPublisher
+    from .services.template_saver import TemplateSaver
     from .transport import RobotClient
 
     robot_id = settings.robot.robot_id
@@ -267,6 +269,34 @@ def _register_tools(mcp: FastMCP, settings: TheseusSettings) -> None:
                 client,
                 expected_root_hash=expected_root_hash,
                 acknowledge_publish=acknowledge_publish,
+            )
+
+    @mcp.tool(
+        name="save_template",
+        description=(
+            "Save a draft subtree as a reusable template."
+            " Pass the draft's setting_id and a non-empty template_name."
+            " The draft is NOT modified — this creates a new template from"
+            " the current draft content.  Optionally pass expected_hash"
+            " (from a prior get_config_detail call) to prove you've read"
+            " the current draft — the call will be refused if the draft"
+            " changed since you read it.  Requires config:write scope."
+            " On success returns the new template_id and a locator suitable"
+            " for get_template."
+        ),
+    )
+    async def save_template(
+        setting_id: int,
+        template_name: str,
+        expected_hash: str | None = None,
+    ) -> SaveTemplateResponse:
+        saver = TemplateSaver(robot_id=robot_id)
+        async with RobotClient.from_settings(settings) as client:
+            return await saver.save_template(
+                client,
+                setting_id=setting_id,
+                template_name=template_name,
+                expected_hash=expected_hash,
             )
 
 

@@ -361,6 +361,24 @@ class PublishConfigResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+# -- save_template -----------------------------------------------------------
+
+
+class SaveTemplateResponse(BaseModel):
+    """``save_template`` response — result of saving a draft subtree as a template.
+
+    The *template_id* is the new template's ID suitable for use with
+    ``get_template``. *locator* is the root of the template configuration
+    tree (``tcfg:template/{template_id}``).
+    """
+
+    template_id: int
+    locator: str = ""
+    meta: ResponseMeta = Field(alias="_meta")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 # -- Hash utility -----------------------------------------------------------
 
 

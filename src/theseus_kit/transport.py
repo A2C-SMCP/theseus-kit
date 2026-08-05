@@ -30,7 +30,7 @@ from tfrs_auth.client import Token
 from tfrs_auth.errors import TfrsAuthError
 
 from .config import RobotTarget, TheseusSettings
-from .errors import AuthRejectedError, RobotApiError, RobotValidationError, map_exchange_error
+from .errors import AuthRejectedError, DraftNotFoundError, RobotApiError, RobotValidationError, map_exchange_error
 from .models import PaginatedList, TFSResponse, parse_tfs_response
 from .redaction import redact_secrets
 from .routing import RequestContext
@@ -228,6 +228,36 @@ class RobotClient:
                 status_code=0,
             ) from exc
         return self._ensure_ok(path, response)
+
+    async def get_draft_dict(self, setting_id: int) -> dict[str, Any]:
+        """Fetch a draft DTO as a raw dict for hash comparison.
+
+        Unlike the read helpers, this returns the raw ``data`` dict without
+        building a full response model — optimized for the read-check-write
+        optimistic concurrency pattern used by :class:`DraftEditor` and
+        :class:`TemplateSaver`.
+
+        Raises :class:`DraftNotFoundError` when *setting_id* does not exist
+        (HTTP 404 or body code 404).
+        """
+        path = f"/v1/factory/drafts/{setting_id}"
+        try:
+            response = await self.get(path)
+        except RobotApiError as exc:
+            if exc.status_code == 404:
+                raise DraftNotFoundError(f"Draft {setting_id} not found (404).") from exc
+            raise
+        body: dict[str, Any] = response.json()
+        code: int = body.get("code", 0)
+        if code == 404:
+            raise DraftNotFoundError(f"Draft {setting_id} not found (404).")
+        if code != 200:
+            raise RobotApiError(
+                f"robot returned code {code} from GET {path}: {body.get('message', '')}",
+                status_code=code,
+            )
+        # ``or {}`` guards against ``"data": null`` (key present, value None).
+        return body.get("data") or {}
 
     # -- typed read helpers -------------------------------------------------
 
