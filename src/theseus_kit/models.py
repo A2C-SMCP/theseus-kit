@@ -292,3 +292,25 @@ def decode_cursor(token: str) -> CursorData:
         offset=d.get("o", 0),
         revision_at_issue=d.get("r", ""),
     )
+
+
+# -- get_llms_doc -----------------------------------------------------------
+
+
+class LlmsDoc(BaseModel):
+    """``get_llms_doc`` response — a bounded llms.txt documentation page.
+
+    When ``path`` is empty the tool fetches ``/llms.txt`` (the index);
+    otherwise it fetches ``/v1/factory/llm-docs/{path}``.
+    """
+
+    path: str = ""
+    is_index: bool = False
+    content: str = ""
+    content_type: str = "text/markdown"
+    truncated: bool = False
+    bytes_returned: int = 0
+    bytes_total: int | None = None
+    meta: ResponseMeta = Field(alias="_meta")
+
+    model_config = ConfigDict(populate_by_name=True)

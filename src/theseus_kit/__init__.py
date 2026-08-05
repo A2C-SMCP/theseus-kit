@@ -14,6 +14,7 @@ from theseus_kit.errors import (
     ConfigLocatorError,
     CredentialError,
     ExchangeUnavailableError,
+    LlmsDocError,
     RobotApiError,
     RobotValidationError,
     RoutingConfigError,
@@ -27,6 +28,7 @@ from theseus_kit.models import (
     CursorData,
     ListNode,
     ListNodesResponse,
+    LlmsDoc,
     NodeKind,
     PaginatedList,
     StateSummary,
@@ -36,7 +38,7 @@ from theseus_kit.models import (
 from theseus_kit.oauth import TheseusTokenVerifier, build_token_verifier
 from theseus_kit.routing import RequestContext
 from theseus_kit.server import create_mcp_server
-from theseus_kit.services import ConfigReader
+from theseus_kit.services import ConfigReader, LlmsDocReader
 from theseus_kit.transport import RobotClient, StaticTokenSource
 
 __version__ = "0.1.0.dev0"
@@ -55,6 +57,7 @@ __all__ = [
     "TheseusError",
     "ConfigError",
     "ConfigLocatorError",
+    "LlmsDocError",
     "RoutingConfigError",
     "CredentialError",
     "ScopeOrAudienceError",
@@ -67,9 +70,11 @@ __all__ = [
     "build_token_verifier",
     "create_mcp_server",
     "ConfigReader",
+    "LlmsDocReader",
     "ConfigSummary",
     "StateSummary",
     "ListNodesResponse",
+    "LlmsDoc",
     "ListNode",
     "NodeKind",
     "ConfigDetail",

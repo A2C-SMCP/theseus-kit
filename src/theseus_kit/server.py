@@ -15,6 +15,7 @@ from .models import (
     ConfigDetail,
     ConfigSummary,
     ListNodesResponse,
+    LlmsDoc,
     TemplateResponse,
 )
 
@@ -76,6 +77,7 @@ def create_mcp_server(settings: TheseusSettings | None = None) -> FastMCP:
 def _register_tools(mcp: FastMCP, settings: TheseusSettings) -> None:
     """Register the four progressive-disclosure read tools on *mcp*."""
     from .services.config_reader import ConfigReader
+    from .services.llms_doc_reader import LlmsDocReader
     from .transport import RobotClient
 
     robot_id = settings.robot.robot_id
@@ -184,6 +186,27 @@ def _register_tools(mcp: FastMCP, settings: TheseusSettings) -> None:
                 depth=depth,
                 max_bytes=max_bytes,
             )
+
+    @mcp.tool(
+        name="get_llms_doc",
+        description=(
+            "Read the robot's runtime llms.txt configuration documentation."
+            " Call WITHOUT a path FIRST to get the index (/llms.txt) — it lists"
+            " available documentation pages.  Then call WITH a specific path"
+            " (e.g. 'schema/brain') to read a particular page.  The content is"
+            " bounded by max_bytes (default 8192, max 32768); use the index to"
+            " decide which pages to load.  Use this when you need to understand"
+            " what endpoints, scenes, factories, fields, and scopes are available"
+            " for THIS specific robot version."
+        ),
+    )
+    async def get_llms_doc(
+        path: str = "",
+        max_bytes: int = 8192,
+    ) -> LlmsDoc:
+        reader = LlmsDocReader()
+        async with RobotClient.from_settings(settings) as client:
+            return await reader.get_doc(client, path=path, max_bytes=max_bytes)
 
 
 class _LazyOAuthTokenVerifier:

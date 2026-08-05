@@ -75,6 +75,10 @@ class ConfigLocatorError(TheseusError):
     """The supplied locator string is malformed or references an unknown state."""
 
 
+class LlmsDocError(TheseusError):
+    """The requested llms.txt document path is invalid or forbidden."""
+
+
 class RobotValidationError(RobotApiError):
     """The robot rejected the request body as invalid (HTTP 422).
 
