@@ -7,8 +7,9 @@ from typing import TYPE_CHECKING, Any
 
 from mcp.server.auth.provider import AccessToken
 from mcp.server.auth.settings import AuthSettings
-from mcp.server.fastmcp import FastMCP
-from pydantic import AnyHttpUrl
+from mcp.server.fastmcp import Context, FastMCP
+from mcp.types import Annotations
+from pydantic import AnyHttpUrl, AnyUrl
 
 from .config import OAuthConfig, TheseusSettings
 from .models import (
@@ -29,6 +30,45 @@ _INSTRUCTIONS = (
     "Inspect and manage TFRobot configuration. Read the exposed editing skills "
     "and version-specific llms.txt documentation before mutating configuration."
 )
+
+_WINDOW_NS = "window://com.a2c-smcp.theseus-kit"
+
+
+def _register_resources(mcp: FastMCP, settings: TheseusSettings) -> None:
+    """Register the two ``window://`` resources on *mcp*."""
+    from .resources import build_recent, build_summary
+    from .transport import RobotClient
+
+    robot_id = settings.robot.robot_id
+
+    @mcp.resource(
+        f"{_WINDOW_NS}/config/summary",
+        name="Config Summary",
+        description=(
+            "Compact robot identity and three-state configuration overview"
+            " (draft / template / online). Updates after every mutation."
+        ),
+        mime_type="application/json",
+        annotations=Annotations(audience=["assistant"], priority=0.9),
+    )
+    async def config_summary() -> dict[str, Any]:
+        async with RobotClient.from_settings(settings) as client:
+            return await build_summary(client, robot_id)
+
+    @mcp.resource(
+        f"{_WINDOW_NS}/config/recent",
+        name="Config Recent Detail",
+        description=(
+            "The most recently opened configuration detail (via"
+            " get_config_detail). Returns a clear empty state when no detail"
+            " has been opened yet."
+        ),
+        mime_type="application/json",
+        annotations=Annotations(audience=["assistant"], priority=0.8),
+    )
+    async def config_recent_detail() -> dict[str, Any]:
+        async with RobotClient.from_settings(settings) as client:
+            return await build_recent(client, robot_id)
 
 
 def create_mcp_server(settings: TheseusSettings | None = None) -> FastMCP:
@@ -70,8 +110,30 @@ def create_mcp_server(settings: TheseusSettings | None = None) -> FastMCP:
 
     if settings is not None:
         _register_tools(mcp, settings)
+        _register_resources(mcp, settings)
 
     return mcp
+
+
+# -- Resource notification --------------------------------------------------
+
+
+def _notify(ctx: Context[Any, Any, Any] | None, resource: str) -> None:
+    """Best-effort resource-updated notification.
+
+    When *ctx* is available (tool was called through an MCP session), send a
+    ``notifications/resources/updated`` for the given *resource* (one of
+    ``"summary"`` or ``"recent"``).  Silently skips when no session context
+    is available (e.g. in tests that call tool functions directly).
+    """
+    if ctx is None:
+        return
+    try:
+        uri = AnyUrl(f"{_WINDOW_NS}/config/{resource}")
+        ctx.request_context.session.send_resource_updated(uri)
+    except Exception:
+        # Never let a notification failure surface as a tool error.
+        pass
 
 
 # -- Tool registration -----------------------------------------------------
@@ -155,15 +217,19 @@ def _register_tools(mcp: FastMCP, settings: TheseusSettings) -> None:
         depth: int = 3,
         max_bytes: int = 8192,
     ) -> ConfigDetail:
+        from .resources import set_last_locator
+
         reader = ConfigReader(robot_id=robot_id)
         async with RobotClient.from_settings(settings) as client:
-            return await reader.get_detail(
+            result = await reader.get_detail(
                 client,
                 locator=locator,
                 select=select,
                 depth=depth,
                 max_bytes=max_bytes,
             )
+        set_last_locator(locator)
+        return result
 
     @mcp.tool(
         name="get_template",
@@ -234,16 +300,21 @@ def _register_tools(mcp: FastMCP, settings: TheseusSettings) -> None:
         setting_name: str,
         config: dict[str, Any],
         expected_hash: str | None = None,
+        ctx: Context[Any, Any, Any] | None = None,
     ) -> UpdateDraftResponse:
         editor = DraftEditor(robot_id=robot_id)
         async with RobotClient.from_settings(settings) as client:
-            return await editor.update_draft(
+            result = await editor.update_draft(
                 client,
                 setting_id=setting_id,
                 setting_name=setting_name,
                 config=config,
                 expected_hash=expected_hash,
             )
+        # Resource notification: summary (draft revision changed) + recent (stale).
+        _notify(ctx, "summary")
+        _notify(ctx, "recent")
+        return result
 
     @mcp.tool(
         name="publish_config",
@@ -262,14 +333,19 @@ def _register_tools(mcp: FastMCP, settings: TheseusSettings) -> None:
     async def publish_config(
         expected_root_hash: str | None = None,
         acknowledge_publish: bool = False,
+        ctx: Context[Any, Any, Any] | None = None,
     ) -> PublishConfigResponse:
         publisher = ConfigPublisher(robot_id=robot_id)
         async with RobotClient.from_settings(settings) as client:
-            return await publisher.publish_config(
+            result = await publisher.publish_config(
                 client,
                 expected_root_hash=expected_root_hash,
                 acknowledge_publish=acknowledge_publish,
             )
+        # Resource notification: both summary and recent are affected.
+        _notify(ctx, "summary")
+        _notify(ctx, "recent")
+        return result
 
     @mcp.tool(
         name="save_template",
@@ -289,15 +365,19 @@ def _register_tools(mcp: FastMCP, settings: TheseusSettings) -> None:
         setting_id: int,
         template_name: str,
         expected_hash: str | None = None,
+        ctx: Context[Any, Any, Any] | None = None,
     ) -> SaveTemplateResponse:
         saver = TemplateSaver(robot_id=robot_id)
         async with RobotClient.from_settings(settings) as client:
-            return await saver.save_template(
+            result = await saver.save_template(
                 client,
                 setting_id=setting_id,
                 template_name=template_name,
                 expected_hash=expected_hash,
             )
+        # Resource notification: summary (template count changed).
+        _notify(ctx, "summary")
+        return result
 
 
 class _LazyOAuthTokenVerifier:

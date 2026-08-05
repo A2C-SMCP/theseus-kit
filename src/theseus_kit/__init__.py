@@ -44,6 +44,7 @@ from theseus_kit.models import (
     compute_config_hash,
 )
 from theseus_kit.oauth import TheseusTokenVerifier, build_token_verifier
+from theseus_kit.resources import set_last_locator
 from theseus_kit.routing import RequestContext
 from theseus_kit.server import create_mcp_server
 from theseus_kit.services import ConfigPublisher, ConfigReader, DraftEditor, LlmsDocReader, TemplateSaver
@@ -101,4 +102,5 @@ __all__ = [
     "TemplateSaver",
     "PublishNotConfirmedError",
     "PublishPreCheckError",
+    "set_last_locator",
 ]
