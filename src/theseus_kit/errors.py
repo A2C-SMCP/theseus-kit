@@ -95,6 +95,24 @@ class DraftConflictError(TheseusError):
         super().__init__(message)
 
 
+class PublishNotConfirmedError(TheseusError):
+    """The caller must explicitly acknowledge the publish action (acknowledge_publish=True).
+
+    Publishing a draft configuration is a global, irreversible side-effect. This
+    guard forces the caller to confirm it understood the consequences before the
+    request is sent upstream.
+    """
+
+
+class PublishPreCheckError(TheseusError):
+    """A pre-publish guard failed — the root hash doesn't match, or the draft
+    structure changed since the caller last read it.
+
+    The caller should re-read the current draft state to understand the
+    discrepancy before retrying.
+    """
+
+
 class RobotValidationError(RobotApiError):
     """The robot rejected the request body as invalid (HTTP 422).
 

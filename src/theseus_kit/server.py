@@ -16,6 +16,7 @@ from .models import (
     ConfigSummary,
     ListNodesResponse,
     LlmsDoc,
+    PublishConfigResponse,
     TemplateResponse,
     UpdateDraftResponse,
 )
@@ -80,6 +81,7 @@ def _register_tools(mcp: FastMCP, settings: TheseusSettings) -> None:
     from .services.config_reader import ConfigReader
     from .services.draft_editor import DraftEditor
     from .services.llms_doc_reader import LlmsDocReader
+    from .services.publisher import ConfigPublisher
     from .transport import RobotClient
 
     robot_id = settings.robot.robot_id
@@ -239,6 +241,32 @@ def _register_tools(mcp: FastMCP, settings: TheseusSettings) -> None:
                 setting_name=setting_name,
                 config=config,
                 expected_hash=expected_hash,
+            )
+
+    @mcp.tool(
+        name="publish_config",
+        description=(
+            "Publish ALL draft configuration to the online state."
+            " This is a global, irreversible side-effect — it publishes the"
+            " entire configuration tree starting from the ROBOT-scene draft."
+            " Use acknowledge_publish=True to confirm you understand the"
+            " consequences.  Optionally pass expected_root_hash (from a prior"
+            " get_config_summary call) to prove you've read the current draft"
+            " structure — the call will be refused if the draft root changed"
+            " since you read it.  Requires config:publish scope (config:write"
+            " alone is not sufficient).  On success returns the onlineRobotId."
+        ),
+    )
+    async def publish_config(
+        expected_root_hash: str | None = None,
+        acknowledge_publish: bool = False,
+    ) -> PublishConfigResponse:
+        publisher = ConfigPublisher(robot_id=robot_id)
+        async with RobotClient.from_settings(settings) as client:
+            return await publisher.publish_config(
+                client,
+                expected_root_hash=expected_root_hash,
+                acknowledge_publish=acknowledge_publish,
             )
 
 

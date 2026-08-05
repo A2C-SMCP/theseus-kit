@@ -343,6 +343,24 @@ class UpdateDraftResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+# -- publish_config -----------------------------------------------------------
+
+
+class PublishConfigResponse(BaseModel):
+    """``publish_config`` response — result of a global draft release.
+
+    The *online_robot_id* is the ID of the ROBOT-scene setting that was
+    published to the online state. *locator* is the root of the online
+    configuration tree (``tcfg:online``).
+    """
+
+    online_robot_id: int
+    locator: str = "tcfg:online"
+    meta: ResponseMeta = Field(alias="_meta")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 # -- Hash utility -----------------------------------------------------------
 
 

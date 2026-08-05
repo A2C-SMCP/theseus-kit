@@ -17,6 +17,8 @@ from theseus_kit.errors import (
     DraftNotFoundError,
     ExchangeUnavailableError,
     LlmsDocError,
+    PublishNotConfirmedError,
+    PublishPreCheckError,
     RobotApiError,
     RobotValidationError,
     RoutingConfigError,
@@ -33,6 +35,7 @@ from theseus_kit.models import (
     LlmsDoc,
     NodeKind,
     PaginatedList,
+    PublishConfigResponse,
     StateSummary,
     TemplateResponse,
     TFSResponse,
@@ -42,7 +45,7 @@ from theseus_kit.models import (
 from theseus_kit.oauth import TheseusTokenVerifier, build_token_verifier
 from theseus_kit.routing import RequestContext
 from theseus_kit.server import create_mcp_server
-from theseus_kit.services import ConfigReader, DraftEditor, LlmsDocReader
+from theseus_kit.services import ConfigPublisher, ConfigReader, DraftEditor, LlmsDocReader
 from theseus_kit.transport import RobotClient, StaticTokenSource
 
 __version__ = "0.1.0.dev0"
@@ -90,5 +93,9 @@ __all__ = [
     "TFSResponse",
     "PaginatedList",
     "UpdateDraftResponse",
+    "PublishConfigResponse",
     "compute_config_hash",
+    "ConfigPublisher",
+    "PublishNotConfirmedError",
+    "PublishPreCheckError",
 ]
