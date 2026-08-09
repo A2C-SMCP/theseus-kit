@@ -18,8 +18,9 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import AliasGenerator, BaseModel, ConfigDict
 from pydantic import Field as PydField
+from pydantic.alias_generators import to_camel
 
 from theseus_kit.errors import ConfigLocatorError
 from theseus_kit.models import (
@@ -354,7 +355,7 @@ class ConfigReader:
         return StateSummary(
             present=True,
             root_locator=root_locator,
-            status="dirty" if state == "draft" else None,
+            status="dirty" if state == "draft" and len(scenes) > 1 else None,
             count=count,
         )
 
@@ -702,7 +703,8 @@ class ConfigReader:
         data = body.get("data", [])
         if not isinstance(data, list):
             return []
-        return [item if isinstance(item, dict) else {} for item in data]
+        # Normalise camelCase API keys → snake_case via _SettingDto.
+        return [_SettingDto.model_validate(item).model_dump() if isinstance(item, dict) else {} for item in data]
 
     # -- get_config_detail --------------------------------------------------
 
@@ -857,6 +859,11 @@ class _FactoryList(BaseModel):
     """Adapter for ``GET .../{scene}/factories`` → ``TFSResponse[{factory_names}]``."""
 
     factory_names: list[str] = PydField(default_factory=list)
+    model_config = ConfigDict(
+        extra="allow",
+        alias_generator=AliasGenerator(to_camel),
+        populate_by_name=True,
+    )
 
 
 class _SettingDto(BaseModel):
@@ -874,7 +881,11 @@ class _SettingDto(BaseModel):
     factory_version: str = ""
     template_name: str = ""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(
+        extra="allow",
+        alias_generator=AliasGenerator(to_camel),
+        populate_by_name=True,
+    )
 
 
 class _AnyDict(BaseModel):

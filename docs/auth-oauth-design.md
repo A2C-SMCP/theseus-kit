@@ -20,8 +20,8 @@ AS);不把 MCP 访问令牌直接透传给目标机器人。
 留好复用点(代码注释多处点名 #18):
 
 ```
-TheseusSettings(robot, credential: client_credentials | user_pat)
-  → build_credential()           # config.CredentialConfig → tfrs_auth.Credential
+TheseusSettings(robot, credential: user_pat)
+  → build_credential()           # config.CredentialConfig → tfrs_auth.PatCredential
   → AsyncCachingTokenSource      # 缓存 / single-flight / 临期刷新 / 退避(tfrs-auth)
   → RobotClient (RobotAuth)      # 注入 Authorization: Bearer <jwt> + X-TF-*
   → RequestContext               # 唯一产出 X-TF-Namespace/RobotId/RobotType
@@ -34,7 +34,7 @@ TheseusSettings(robot, credential: client_credentials | user_pat)
 
 **关键**:OAuth 用户凭证的下游汇入点 = `tfrs_auth.UserJwtCredential`
 (User JWT → `aud=robot:<callee>` 短 JWT,RFC 8693 换发),驱动它的 `AsyncCachingTokenSource`
-与现有 PAT/client_credentials 路径**完全同一**。#18 本质上是"在管线上游多接一个
+与现有 user_pat 路径**完全同一**。#18 本质上是"在管线上游多接一个
 OAuth 用户凭证来源"。
 
 ## 3. 关键事实(已核实,决定实现方式)
@@ -55,7 +55,7 @@ theseus-kit 只做 **MCP-server 集成**(暴露 PRM、校验 Bearer、把用户�
 ## 4. 凭证选择顺序(不变式)
 
 ```
-配置了 PAT / client_credentials?  ──是──▶  走显式凭证路径(#17,#18 不参与)
+配置了 user_pat?  ──是──▶  走显式凭证路径(#17,#18 不参与)
         │否
         ▼
   走 OAuth 授权流程(#18)
@@ -110,7 +110,7 @@ theseus-kit 只做 **MCP-server 集成**(暴露 PRM、校验 Bearer、把用户�
 
 **关键简化**(vs 原设计):
 - ~~step ② 用户身份 → UserJwtCredential → AsyncCachingTokenSource → robot JWT~~（删除）
-- `AsyncCachingTokenSource` 只服务 PAT/client_credentials 路径
+- `AsyncCachingTokenSource` 只服务 user_pat 路径
 - OAuth 路径新增静态令牌源：直接持有已验 token，不做换发/缓存/刷新
 - 令牌边界更新：OAuth AS token **可以**转发给 TFRobotServer（原生接受），
   但绝不泄露到日志/异常/MCP 结果
@@ -139,14 +139,14 @@ theseus-kit(STDIO)
 ```
 (OAuth AS token, 已验证) ─▶ RobotClient(RobotAuth: Bearer + X-TF-*) ─▶ TFRobotServer
                                                          ▲
-(PAT / client_credentials) ─▶ AsyncCachingTokenSource ──┘
+(user_pat) ─▶ AsyncCachingTokenSource ──┘
                               (换发+缓存, #17 已有)
 ```
 
 **两条路径的差异**:
 | 路径 | 令牌来源 | 是否换发 | 缓存/刷新 |
 |------|----------|----------|-----------|
-| PAT / client_credentials | `AsyncCachingTokenSource` | 是(RFC 8693) | 是 |
+| user_pat | `AsyncCachingTokenSource` | 是(RFC 8693) | 是 |
 | OAuth | MCP Client Bearer(静态) | 否(直传) | 否(MCP Client 侧负责) |
 
 `RobotTarget`、`RequestContext`、`RobotClient`(含 `RobotAuth`)、`redaction`、错误映射
@@ -176,7 +176,7 @@ RS256,aud=`{iss}/robots/<id>`、sub=`user:<id>`)不能作为 `subject_token` 被
 对称密钥 `JWT_SECRET`**,并要求自定义 `user_id`/`account_id`/`organization_id` claim(任一为 0
 即拒)。#3 是 RS256 且无 `user_id` claim,两道关都挂。"User JWT" 指的是 user-service 登录会话
 JWT(`auth.GenerateToken` 签、HS256),**不是** OAuth AS access token。换发机制本就只服务
-**登录会话 JWT / PAT / client_credentials**,不服务 OAuth 用户令牌。
+**登录会话 JWT / user_pat**,不服务 OAuth 用户令牌。
 
 ⇒ `UserJwtCredential(user_jwt=<#3>, audience=robot:<id>)` 这条接缝**作废**。
 
@@ -203,7 +203,7 @@ JWT(`auth.GenerateToken` 签、HS256),**不是** OAuth AS access token。换发�
 - 若配置了 `admin.org_slug`，则 JWT 须额外包含 `org` claim 并精确匹配
 
 **对 theseus-kit 的影响**:
-- **OAuth 路径去掉换发环节** — `UserJwtCredential`/`AsyncCachingTokenSource` 只服务 PAT/client_credentials
+- **OAuth 路径去掉换发环节** — `UserJwtCredential`/`AsyncCachingTokenSource` 只服务 user_pat
 - **令牌直通** — theseus-kit 验证 OAuth AS token 后，直接作为 Bearer 转发给 TFRobotServer
 - **新增 StaticToken 源** — 区别于 `AsyncCachingTokenSource`（换发+缓存），OAuth 路径需要简单的静态令牌源（每个 MCP 请求携带的 token 直接使用）
 - **设计大幅简化** — §6 Topology A 的 step ②③ 合并为「验证 → 直传」，S3（换发接缝）不再需要

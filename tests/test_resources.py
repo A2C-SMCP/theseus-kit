@@ -53,9 +53,9 @@ def _settings(fake: FakeRobotServer) -> TheseusSettings:
             "manager_base_url": fake.manager_base_url,
         },
         credential={
-            "kind": "client_credentials",
-            "machine_client_id": "turingfocus:000042",
-            "machine_client_secret": SecretStr("tfp_secret"),
+            "kind": "user_pat",
+            "pat": SecretStr("tfp_test_pat"),
+            "robot_public_id": "turingfocus:000042",
         },
     )
 

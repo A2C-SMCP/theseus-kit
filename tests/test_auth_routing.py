@@ -1,4 +1,4 @@
-"""Real-HTTP tests for theseus-kit #17 auth + routing (client_credentials path).
+"""Real-HTTP tests for theseus-kit #17 auth + routing (user_pat path).
 
 Drives the REAL tfrs-auth ``AsyncCachingTokenSource`` and theseus-kit's
 ``RobotAuth``/``RobotClient`` against a real listening fake server (Manager
@@ -17,7 +17,6 @@ from pydantic import SecretStr, ValidationError
 
 from theseus_kit import (
     AuthRejectedError,
-    ClientCredentialsConfig,
     ConfigError,
     CredentialError,
     ExchangeUnavailableError,
@@ -57,14 +56,12 @@ async def _no_sleep(_: float) -> None:
 def _client(
     fake: FakeRobotServer,
     *,
-    cred: ClientCredentialsConfig | UserPatConfig | None = None,
+    cred: UserPatConfig | None = None,
     clock: object | None = None,
     sleep: object | None = None,
     api_base_url: str | None = None,
 ) -> RobotClient:
-    credential = cred or ClientCredentialsConfig(
-        machine_client_id="turingfocus:000042", machine_client_secret=SecretStr("tfp_secret")
-    )
+    credential = cred or UserPatConfig(pat=SecretStr("tfp_test_pat"), robot_public_id="turingfocus:000042")
     token_source = build_token_source(
         credential,
         manager_base_url=fake.manager_base_url,
@@ -93,20 +90,20 @@ def test_routing_rejects_bad_charset(bad: str) -> None:
         RequestContext(robot_id=bad, namespace="default", robot_type="tfrobot")
 
 
-# --- exchange wire + header injection (client_credentials) -------------------
+# --- exchange wire + header injection (user_pat / token-exchange) -------------
 
 
-async def test_exchange_wire_client_credentials(fake_server: FakeRobotServer) -> None:
+async def test_exchange_wire_user_pat(fake_server: FakeRobotServer) -> None:
     async with _client(fake_server) as client:
         await client.get_llms_txt()
     form = parse_form(fake_server.token_posts()[0].body)
-    assert form["grant_type"] == "client_credentials"
-    assert form["client_id"] == "turingfocus:000042"
-    assert form["audience"] == "robot:turingfocus:000042"  # self-management: callee == client id
+    assert form["grant_type"] == "urn:ietf:params:oauth:grant-type:token-exchange"
+    assert form["subject_token"] == "tfp_test_pat"
+    assert form["subject_token_type"] == "urn:ietf:params:oauth:token-type:access_token"
+    assert form["audience"] == "robot:turingfocus:000042"
     assert form["scope"] == "config:read"
-    assert form["client_secret"] == "tfp_secret"
-    # client_secret IS on the exchange wire (client_credentials grant requires it,
-    # sent to the Manager over TLS); the redaction invariant is about logs/repr/
+    # The user's PAT is exchanged for a robot-scoped JWT; the PAT is sent
+    # to the Manager over TLS. The redaction invariant is about logs/repr/
     # errors, not the wire — covered by the redaction tests below.
 
 
@@ -229,9 +226,7 @@ async def test_network_failure_maps_to_robot_api_error(fake_server: FakeRobotSer
 
 
 def test_secret_not_in_config_repr() -> None:
-    cred = ClientCredentialsConfig(
-        machine_client_id="turingfocus:000042", machine_client_secret=SecretStr("tfp_supersecret")
-    )
+    cred = UserPatConfig(pat=SecretStr("tfp_supersecret"), robot_public_id="turingfocus:000042")
     assert "tfp_supersecret" not in repr(cred)
 
 
@@ -362,23 +357,23 @@ def test_user_pat_builds_credential_with_correct_audience() -> None:
     assert cred.scope == "config:read"
 
 
-def test_settings_load_client_credentials_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_settings_load_user_pat_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     env = {
         "THESEUS_ROBOT__ROBOT_ID": "robot-1",
         "THESEUS_ROBOT__NAMESPACE": "default",
         "THESEUS_ROBOT__ROBOT_TYPE": "tfrobot",
         "THESEUS_ROBOT__API_BASE_URL": "https://api.example.com",
         "THESEUS_ROBOT__MANAGER_BASE_URL": "https://mgr.example.com",
-        "THESEUS_CREDENTIAL__KIND": "client_credentials",
-        "THESEUS_CREDENTIAL__MACHINE_CLIENT_ID": "turingfocus:000042",
-        "THESEUS_CREDENTIAL__MACHINE_CLIENT_SECRET": "tfp_secret",
+        "THESEUS_CREDENTIAL__KIND": "user_pat",
+        "THESEUS_CREDENTIAL__PAT": "tfp_test_pat",
+        "THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID": "turingfocus:000042",
     }
-    for key in [*env, "THESEUS_CREDENTIAL__PAT", "THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID"]:
+    for key in env:
         monkeypatch.delenv(key, raising=False)
     for k, v in env.items():
         monkeypatch.setenv(k, v)
     settings = TheseusSettings()
-    assert settings.credential.kind == "client_credentials"
+    assert settings.credential.kind == "user_pat"
     assert settings.robot.api_base_url == "https://api.example.com"
 
 
@@ -478,10 +473,8 @@ class TestOAuthConfigEnvLoading:
         }
         for key in env:
             monkeypatch.setenv(key, env[key])
-        # Also clear any PAT / client_credentials env that might linger.
+        # Also clear any PAT env that might linger.
         for stale in [
-            "THESEUS_CREDENTIAL__MACHINE_CLIENT_ID",
-            "THESEUS_CREDENTIAL__MACHINE_CLIENT_SECRET",
             "THESEUS_CREDENTIAL__PAT",
             "THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID",
         ]:
@@ -515,11 +508,11 @@ class TestOAuthConfigEnvLoading:
 
 
 class TestOAuthConfigDiscrimination:
-    """Credential choice invariant: PAT/client_credentials first, OAuth only when no
-    explicit credential is configured."""
+    """Credential choice invariant: user_pat is the explicit credential path;
+    OAuth is selected when kind=oauth."""
 
-    def test_kind_oauth_produces_oauth_config_not_client_credentials(self) -> None:
-        """The discriminated union routes kind=oauth to OAuthConfig, not the others."""
+    def test_kind_oauth_produces_oauth_config(self) -> None:
+        """The discriminated union routes kind=oauth to OAuthConfig."""
         settings = TheseusSettings(
             robot=dict(
                 robot_id="robot-1",
@@ -534,11 +527,10 @@ class TestOAuthConfigDiscrimination:
             ),
         )
         assert isinstance(settings.credential, OAuthConfig)
-        assert not isinstance(settings.credential, ClientCredentialsConfig)
         assert not isinstance(settings.credential, UserPatConfig)
 
-    def test_kind_client_credentials_still_works(self) -> None:
-        """Existing client_credentials path is unaffected by the new oauth kind."""
+    def test_kind_user_pat_works(self) -> None:
+        """The user_pat credential path loads correctly."""
         settings = TheseusSettings(
             robot=dict(
                 robot_id="robot-1",
@@ -548,12 +540,12 @@ class TestOAuthConfigDiscrimination:
                 manager_base_url="https://mgr.example.com",
             ),
             credential=dict(
-                kind="client_credentials",
-                machine_client_id="turingfocus:000042",
-                machine_client_secret="tfp_secret",
+                kind="user_pat",
+                pat="tfp_test_pat",
+                robot_public_id="turingfocus:000042",
             ),
         )
-        assert isinstance(settings.credential, ClientCredentialsConfig)
+        assert isinstance(settings.credential, UserPatConfig)
 
     def test_missing_authorization_server_rejected(self) -> None:
         """OAuthConfig without authorization_server is incomplete → ValidationError."""
@@ -616,9 +608,7 @@ async def test_from_settings_builds_working_client(fake_server: FakeRobotServer)
             api_base_url=fake_server.api_base_url,
             manager_base_url=fake_server.manager_base_url,
         ),
-        credential=ClientCredentialsConfig(
-            machine_client_id="turingfocus:000042", machine_client_secret=SecretStr("tfp_secret")
-        ),
+        credential=UserPatConfig(pat=SecretStr("tfp_test_pat"), robot_public_id="turingfocus:000042"),
     )
     async with RobotClient.from_settings(settings) as client:
         assert await client.get_llms_txt() == "# robot llms.txt\n"

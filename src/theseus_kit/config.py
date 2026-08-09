@@ -4,10 +4,9 @@ Routing metadata is **explicit** (config-injected), never discovered from
 Manager — editing a specific robot inherently requires declaring which one, and
 embedded/internal deployments inject these values externally.
 
-Credentials default to ``client_credentials`` (the robot's own machine
-credential); ``user_pat`` is supported for the direct-user / future-OAuth path.
-Both flow through the same ``tfrs_auth.Credential`` abstraction (see #18). All
-secret fields are pydantic ``SecretStr`` so default ``repr`` / logs never expose
+Credentials default to ``user_pat`` — the user's personal access token is
+exchanged for a robot-scoped JWT via Manager's token-exchange endpoint.
+All secret fields are pydantic ``SecretStr`` so default ``repr`` / logs never expose
 them.
 """
 
@@ -52,24 +51,6 @@ class RobotTarget(BaseModel):
         return value
 
 
-class ClientCredentialsConfig(BaseModel):
-    """Robot's own machine credential (primary path, tfrs-auth 0.2.1+).
-
-    For self-management the token ``audience`` is ``robot:{public_id}``
-    — the robot exchanges a token scoped to itself — so no separate target
-    identity is required.  ``machine_client_id`` is the ``public_id``
-    (``{orgSlug}:{employeeNo}``), from which org_slug and employee_no are
-    derived for caller == callee self-management.
-    """
-
-    kind: Literal["client_credentials"] = "client_credentials"
-    machine_client_id: str = Field(
-        description="机器人 machineClientId — public_id 格式（{orgSlug}:{employeeNo}）",
-        pattern=r"^[a-z0-9-]+:[a-zA-Z0-9]+$",
-    )
-    machine_client_secret: SecretStr = Field(description="机器人 machineClientSecret")
-
-
 class UserPatConfig(BaseModel):
     """User personal access token (direct-user / future-OAuth path).
 
@@ -89,7 +70,7 @@ class UserPatConfig(BaseModel):
 class OAuthConfig(BaseModel):
     """OAuth 2.0 / 2.1 authorization (MCP-standard, no PAT).
 
-    When no explicit PAT or ``client_credentials`` is configured, theseus-kit
+    When no explicit PAT is configured, theseus-kit
     acts as an OAuth Protected Resource (RS): the MCP Client drives the
     authorization-code + PKCE flow against the TFRSManager AS, and theseus-kit
     validates the resulting Bearer token then forwards it directly to the target
@@ -146,7 +127,7 @@ class OAuthConfig(BaseModel):
         return value
 
 
-CredentialConfig = Annotated[ClientCredentialsConfig | UserPatConfig | OAuthConfig, Field(discriminator="kind")]
+CredentialConfig = Annotated[UserPatConfig | OAuthConfig, Field(discriminator="kind")]
 
 
 class TheseusSettings(BaseSettings):
@@ -157,9 +138,9 @@ class TheseusSettings(BaseSettings):
         THESEUS_ROBOT__ROBOT_ID=robot-1
         THESEUS_ROBOT__NAMESPACE=default
         THESEUS_ROBOT__API_BASE_URL=https://api.example.com
-        THESEUS_CREDENTIAL__KIND=client_credentials
-        THESEUS_CREDENTIAL__MACHINE_CLIENT_ID=42
-        THESEUS_CREDENTIAL__MACHINE_CLIENT_SECRET=tfp_xxx
+        THESEUS_CREDENTIAL__KIND=user_pat
+        THESEUS_CREDENTIAL__PAT=tfp_xxx
+        THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID=myorg:12345
     """
 
     model_config = SettingsConfigDict(

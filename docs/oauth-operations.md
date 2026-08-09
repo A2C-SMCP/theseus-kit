@@ -4,30 +4,28 @@
 
 ## 凭证选择：PAT 还是 OAuth？
 
-theseus-kit 支持三种凭证来源，由 `THESEUS_CREDENTIAL__KIND` 显式选择：
+theseus-kit 支持两种凭证来源，由 `THESEUS_CREDENTIAL__KIND` 显式选择：
 
 | 凭证类型 | 适用场景 | 配置方式 |
 |---------|---------|---------|
-| `client_credentials` | 自动化/CI/服务间调用，机器人有机器凭证 | `THESEUS_CREDENTIAL__KIND=client_credentials` |
-| `user_pat` | 用户个人令牌直接使用 | `THESEUS_CREDENTIAL__KIND=user_pat` |
-| `oauth` | 交互式使用，无 PAT/机器凭证 | `THESEUS_CREDENTIAL__KIND=oauth` |
+| `user_pat` | 自动化/CI/后台，用户有 PAT | `THESEUS_CREDENTIAL__KIND=user_pat` |
+| `oauth` | 交互式使用，无 PAT | `THESEUS_CREDENTIAL__KIND=oauth` |
 
 **选择逻辑**：`CredentialConfig` 是 discriminated union，由 `kind` 字段决定激活哪个
-variant，同一时刻只有一种凭证生效。不存在"同时配置多种"的情况——pydantic 只实例化
-匹配 `kind` 的 variant。
+variant，同一时刻只有一种凭证生效。
 
-**PAT 配置示例**（`.env` 或环境变量）：
+**user_pat 配置示例**（`.env` 或环境变量）：
 
 ```bash
-# 机器人自身的机器凭证（自管理：callee == caller）
+# 用户 PAT → Manager token-exchange 换发 robot-scoped JWT
 THESEUS_ROBOT__ROBOT_ID=my-robot
 THESEUS_ROBOT__NAMESPACE=default
 THESEUS_ROBOT__ROBOT_TYPE=tfrobot
 THESEUS_ROBOT__API_BASE_URL=https://api.example.com
 THESEUS_ROBOT__MANAGER_BASE_URL=https://manager.example.com
-THESEUS_CREDENTIAL__KIND=client_credentials
-THESEUS_CREDENTIAL__MACHINE_CLIENT_ID=myorg:12345
-THESEUS_CREDENTIAL__MACHINE_CLIENT_SECRET=tfp_xxxxxxxx
+THESEUS_CREDENTIAL__KIND=user_pat
+THESEUS_CREDENTIAL__PAT=tfp_xxxxxxxx
+THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID=myorg:12345
 ```
 
 **OAuth 配置示例**（`.env` 或环境变量）：

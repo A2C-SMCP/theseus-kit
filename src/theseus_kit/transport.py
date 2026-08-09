@@ -7,7 +7,7 @@ theseus-kit concern, not a generic auth one.
 
 Two token-source paths converge here (§8 of the OAuth design):
 
-* **PAT / client_credentials** → :class:`AsyncCachingTokenSource` (exchange +
+* **user_pat** → :class:`AsyncCachingTokenSource` (exchange +
   cache + refresh, #17).
 * **OAuth** → :class:`StaticTokenSource` (pre-validated bearer, no exchange).
 

@@ -33,9 +33,9 @@ def _settings() -> TheseusSettings:
             "manager_base_url": "https://localhost:1",
         },
         credential={
-            "kind": "client_credentials",
-            "machine_client_id": "test:1",
-            "machine_client_secret": SecretStr("tfp_test"),
+            "kind": "user_pat",
+            "pat": SecretStr("tfp_test_pat"),
+            "robot_public_id": "test:1",
         },
     )
 

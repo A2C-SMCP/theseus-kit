@@ -16,7 +16,6 @@ from pydantic import SecretStr
 
 from theseus_kit import (
     AuthRejectedError,
-    ClientCredentialsConfig,
     ConfigPublisher,
     PublishConfigResponse,
     PublishNotConfirmedError,
@@ -24,6 +23,7 @@ from theseus_kit import (
     RobotApiError,
     RobotClient,
     RobotValidationError,
+    UserPatConfig,
     compute_config_hash,
 )
 from theseus_kit.routing import RequestContext
@@ -45,9 +45,9 @@ def fake() -> Iterator[FakeRobotServer]:
 
 
 def _client(fake: FakeRobotServer) -> RobotClient:
-    cred = ClientCredentialsConfig(
-        machine_client_id="turingfocus:000042",
-        machine_client_secret=SecretStr("tfp_secret"),
+    cred = UserPatConfig(
+        pat=SecretStr("tfp_test_pat"),
+        robot_public_id="turingfocus:000042",
     )
     token_source = build_token_source(cred, manager_base_url=fake.manager_base_url)
     context = RequestContext(**_CTX)

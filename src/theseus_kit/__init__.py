@@ -1,7 +1,6 @@
 """theseus-kit MCP server."""
 
 from theseus_kit.config import (
-    ClientCredentialsConfig,
     CredentialConfig,
     OAuthConfig,
     RobotTarget,
@@ -57,7 +56,6 @@ __all__ = [
     "TheseusSettings",
     "RobotTarget",
     "CredentialConfig",
-    "ClientCredentialsConfig",
     "OAuthConfig",
     "UserPatConfig",
     "RequestContext",

@@ -14,10 +14,10 @@ import pytest
 from pydantic import SecretStr
 
 from theseus_kit import (
-    ClientCredentialsConfig,
     ConfigLocatorError,
     NodeKind,
     RobotClient,
+    UserPatConfig,
 )
 from theseus_kit.routing import RequestContext
 from theseus_kit.services.config_reader import ConfigReader
@@ -38,9 +38,9 @@ def fake() -> Iterator[FakeRobotServer]:
 
 
 def _client(fake: FakeRobotServer, **kw: object) -> RobotClient:
-    cred = ClientCredentialsConfig(
-        machine_client_id="turingfocus:000042",
-        machine_client_secret=SecretStr("tfp_secret"),
+    cred = UserPatConfig(
+        pat=SecretStr("tfp_test_pat"),
+        robot_public_id="turingfocus:000042",
     )
     token_source = build_token_source(cred, manager_base_url=fake.manager_base_url)
     context = RequestContext(**_CTX)

@@ -20,7 +20,7 @@ from tfrs_auth import AsyncCachingTokenSource
 from .config import CredentialConfig
 from .credentials import build_credential
 
-#: Manager token-exchange endpoint path (RFC 8693 token-exchange / client_credentials).
+#: Manager token-exchange endpoint path (RFC 8693 token-exchange).
 TOKEN_PATH = "/api/v1/oauth/token"
 
 

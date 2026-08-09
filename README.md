@@ -42,18 +42,13 @@ export THESEUS_ROBOT__ROBOT_TYPE="tfrobot"
 export THESEUS_ROBOT__API_BASE_URL="https://api.example.com"
 export THESEUS_ROBOT__MANAGER_BASE_URL="https://manager.example.com"
 
-# 凭证（三选一）
-# 方式 1：机器人自身机器凭证（推荐）
-export THESEUS_CREDENTIAL__KIND="client_credentials"
-export THESEUS_CREDENTIAL__MACHINE_CLIENT_ID="myorg:000042"
-export THESEUS_CREDENTIAL__MACHINE_CLIENT_SECRET="tfp_xxx"
-
-# 方式 2：用户个人令牌
+# 凭证（二选一）
+# 方式 1：用户个人令牌（推荐——theseus-kit 是人管配置的工具，非 A2A）
 export THESEUS_CREDENTIAL__KIND="user_pat"
 export THESEUS_CREDENTIAL__PAT="tfp_xxx"
 export THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID="myorg:000042"
 
-# 方式 3：OAuth 2.0（MCP Client 驱动授权）
+# 方式 2：OAuth 2.0（MCP Client 驱动授权）
 export THESEUS_CREDENTIAL__KIND="oauth"
 export THESEUS_CREDENTIAL__AUTHORIZATION_SERVER="https://manager.example.com"
 export THESEUS_CREDENTIAL__SCOPES="config:read config:write"
@@ -123,9 +118,9 @@ theseus-kit 通过 `skill://` 资源暴露 **3 个中文技能指南**，为 LLM
 
 ### 配置方式
 
-#### 1. 显式凭证模式（PAT / client_credentials）
+#### 1. 显式凭证模式（user_pat）
 
-有明确配置的凭证时，theseus-kit 走「凭证换发」路径：
+有明确配置的凭证时，theseus-kit 走「凭证换发」路径：用户的 PAT 作为 subject_token，Manager 通过 token-exchange（RFC 8693）换发目标机器人 scope 的短 JWT。这是**人管配置**的正确鉴权模型。
 
 ```
 配置的凭证 → Manager 换发端点 → 短 JWT（aud=robot:{public_id}）
@@ -147,7 +142,7 @@ MCP Client → TFRSManager AS（Authorization Code + PKCE）
 
 适合**交互式使用**：用户在 MCP Client 中完成授权，无需手动管理令牌。
 
-> **凭证选择不变式**：PAT/client_credentials 始终优先；OAuth 仅在无显式凭证时启用。
+> **凭证选择不变式**：显式凭证（user_pat）始终优先；OAuth 仅在无显式凭证时启用。
 > 配置错误不会静默降级，而是抛出明确的 `ConfigError`。
 
 ### MCP Client 集成
@@ -166,9 +161,9 @@ MCP Client → TFRSManager AS（Authorization Code + PKCE）
         "THESEUS_ROBOT__ROBOT_TYPE": "tfrobot",
         "THESEUS_ROBOT__API_BASE_URL": "https://api.example.com",
         "THESEUS_ROBOT__MANAGER_BASE_URL": "https://manager.example.com",
-        "THESEUS_CREDENTIAL__KIND": "client_credentials",
-        "THESEUS_CREDENTIAL__MACHINE_CLIENT_ID": "myorg:000042",
-        "THESEUS_CREDENTIAL__MACHINE_CLIENT_SECRET": "tfp_xxx"
+        "THESEUS_CREDENTIAL__KIND": "user_pat",
+        "THESEUS_CREDENTIAL__PAT": "tfp_xxx",
+        "THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID": "myorg:000042"
       }
     }
   }
@@ -232,12 +227,12 @@ OAuth 模式下的配置：
 
 theseus-kit 支持**两条凭证路径**，在 `RobotClient` 层自然收敛：
 
-#### 路径 1：显式凭证（PAT / client_credentials）
+#### 路径 1：显式凭证（user_pat）
 
 ```
-ClientCredentialsConfig / UserPatConfig
-  → build_credential()           # 构造 tfrs-auth Credential
-  → AsyncCachingTokenSource      # 换发 + 缓存 + single-flight + 临期刷新 + 退避
+UserPatConfig
+  → build_credential()           # 构造 tfrs-auth PatCredential
+  → AsyncCachingTokenSource      # token-exchange + 缓存 + single-flight + 临期刷新 + 退避
   → RobotAuth                    # 注入 Authorization: Bearer <jwt> + X-TF-*
   → TFRobotServer
 ```
@@ -256,12 +251,12 @@ OAuthConfig
 
 #### 两条路径对比
 
-| | PAT / client_credentials | OAuth 2.0 |
+| | user_pat | OAuth 2.0 |
 |---|---|---|
-| 令牌来源 | Manager 换发（RFC 8693） | MCP Client 授权后直传 |
+| 令牌来源 | Manager 换发（RFC 8693 token-exchange） | MCP Client 授权后直传 |
 | 换发 | 是 | 否 |
 | 缓存/刷新 | AsyncCachingTokenSource 内置 | MCP Client 侧负责 |
-| 适用场景 | 自动化 / CI / 后台 | 交互式使用 |
+| 适用场景 | 人管配置（自动化 / CI / 后台） | 交互式使用 |
 
 ### 数据流
 
@@ -305,7 +300,7 @@ OAuthConfig
 | `transport.py` | `RobotClient` + `RobotAuth`（Bearer + X-TF-* 注入）+ `StaticTokenSource` |
 | `oauth.py` | `TheseusTokenVerifier`（tfrs-auth → MCP SDK 适配）+ RFC 8414 发现 |
 | `tokens.py` | `build_token_source()` — `AsyncCachingTokenSource` 组装 |
-| `credentials.py` | `build_credential()` — PAT / client_credentials → tfrs-auth Credential |
+| `credentials.py` | `build_credential()` — user_pat → tfrs-auth PatCredential |
 | `routing.py` | `RequestContext` — X-TF-* 头部构建与校验 |
 | `errors.py` | 类型化异常层级 + `map_exchange_error()` |
 | `redaction.py` | 令牌脱敏最后防线（PAT / JWT / OAuth token / code / state） |
@@ -333,9 +328,9 @@ THESEUS_ROBOT__NAMESPACE=<ns> \
 THESEUS_ROBOT__ROBOT_TYPE=tfrobot \
 THESEUS_ROBOT__API_BASE_URL=https://api.<clusterDomain> \
 THESEUS_ROBOT__MANAGER_BASE_URL=https://<manager-host> \
-THESEUS_CREDENTIAL__KIND=client_credentials \
-THESEUS_CREDENTIAL__MACHINE_CLIENT_ID=<orgSlug>:<employeeNo> \
-THESEUS_CREDENTIAL__MACHINE_CLIENT_SECRET=<tfp_...> \
+THESEUS_CREDENTIAL__KIND=user_pat \
+THESEUS_CREDENTIAL__PAT=<tfp_...> \
+THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID=<orgSlug>:<employeeNo> \
 uv run pytest tests/test_e2e_robot.py -v -m e2e
 ```
 

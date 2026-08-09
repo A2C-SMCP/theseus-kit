@@ -37,7 +37,7 @@ uv run poe package-check  # twine 检查构建产物
 
 ```bash
 uv run pytest tests/test_auth_routing.py -v
-uv run pytest tests/test_auth_routing.py::test_exchange_wire_client_credentials -v
+uv run pytest tests/test_auth_routing.py::test_exchange_wire_user_pat -v
 ```
 
 ### E2E 测试（需要真实机器人）
@@ -49,9 +49,9 @@ THESEUS_ROBOT__NAMESPACE=<ns> \
 THESEUS_ROBOT__ROBOT_TYPE=tfrobot \
 THESEUS_ROBOT__API_BASE_URL=https://api.<clusterDomain> \
 THESEUS_ROBOT__MANAGER_BASE_URL=https://<manager-host> \
-THESEUS_CREDENTIAL__KIND=client_credentials \
-THESEUS_CREDENTIAL__MACHINE_CLIENT_ID=<robot Account.ID> \
-THESEUS_CREDENTIAL__MACHINE_CLIENT_SECRET=<tfp_...> \
+THESEUS_CREDENTIAL__KIND=user_pat \
+THESEUS_CREDENTIAL__PAT=<tfp_...> \
+THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID=<orgSlug>:<employeeNo> \
 uv run pytest tests/test_e2e_robot.py -v -m e2e
 ```
 
@@ -79,7 +79,7 @@ uv run poe ci && uv run poe build && uv run poe package-check
 - **入口**：`https://api.<clusterDomain>`（Istio 网关），不从集群外访问集群内服务
 - **X-TF-* 头部**（强制三项）：`X-TF-Namespace`、`X-TF-RobotId`、`X-TF-RobotType`，缺任何一项返回 400。值必须匹配 `^[a-z0-9-]+$`
 - **身份标识分离**：令牌 `audience` 是 `robot:<Account.ID>`（数字），与 `X-TF-RobotId`（rid）是**不同标识符**，不可混用
-- **凭证源**：`client_credentials`（机器人自身机器凭证，主路径）和 `user_pat`（用户个人令牌）均通过 `tfrs_auth.Credential` 抽象，统一使用 `AsyncCachingTokenSource`（缓存/单飞/近过期刷新/退避）
+- **凭证源**：`user_pat`（用户个人令牌）通过 `tfrs_auth.PatCredential` 抽象，使用 `AsyncCachingTokenSource`（缓存/单飞/近过期刷新/退避）进行 token-exchange 换发
 - **不做 401 自动刷新重试**：机器人返回 401/403 时抛出 `AuthRejectedError`，不静默重试
 
 ### 关键模块
@@ -91,7 +91,7 @@ uv run poe ci && uv run poe build && uv run poe package-check
 | `routing.py` | `RequestContext` — frozen dataclass，构建时校验 X-TF-* 值，`routing_headers()` 生成三项头部 |
 | `transport.py` | `RobotAuth`（httpx.Auth 子类，注入 Bearer + X-TF-*）和 `RobotClient`（异步 HTTP 客户端，`from_settings()` 工厂方法，只读 helper：`get_llms_txt()`、`get_factory_doc()`） |
 | `tokens.py` | `build_token_source()` — 组装 `AsyncCachingTokenSource`，Manager 换发端点固定 `/api/v1/oauth/token` |
-| `credentials.py` | `build_credential()` — 从 theseus-kit 配置构造 `tfrs_auth` 的 `ClientCredentials` 或 `PatCredential`。`client_credentials` 路径中 callee == caller（self-management） |
+| `credentials.py` | `build_credential()` — 从 theseus-kit 配置构造 `tfrs_auth` 的 `PatCredential`，通过 token-exchange 换发 robot-scoped JWT |
 | `errors.py` | `TheseusError` 异常层级：`ConfigError` → `RoutingConfigError`、`CredentialError`、`ScopeOrAudienceError`、`ExchangeUnavailableError`（含 `retryable`）、`AuthRejectedError`、`SubscriptionFrozenError`（含 `renew_url`）、`RobotApiError`。`map_exchange_error()` 将 `tfrs_auth` 的异常映射为 theseus-kit 类型化错误 |
 | `redaction.py` | 安全最后防线：用正则清除 PAT（`tfp_*`）和 JWT 形式的令牌，防止泄露到日志/错误消息 |
 | `__init__.py` | 公共 API 导出，`__version__` 由 bump-my-version 管理 |

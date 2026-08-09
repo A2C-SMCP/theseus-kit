@@ -11,15 +11,14 @@ the network, so it is gated: it skips unless ``THESEUS_E2E=1`` is set and the
     THESEUS_ROBOT__ROBOT_TYPE=<tfrobot|openclaw|...> \\
     THESEUS_ROBOT__API_BASE_URL=https://api.<clusterDomain> \\
     THESEUS_ROBOT__MANAGER_BASE_URL=https://<manager-host> \\
-    THESEUS_CREDENTIAL__KIND=client_credentials \\
-    THESEUS_CREDENTIAL__MACHINE_CLIENT_ID=<orgSlug>:<employeeNo> \\
-    THESEUS_CREDENTIAL__MACHINE_CLIENT_SECRET=<tfp_...> \\
+    THESEUS_CREDENTIAL__KIND=user_pat \\
+    THESEUS_CREDENTIAL__PAT=<tfp_...> \\
+    THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID=<orgSlug>:<employeeNo> \\
     THESEUS_E2E_FACTORY_DOC=<llm-docs path, optional> \\
     THESEUS_E2E_READ_API=<read API path, optional> \\
     uv run pytest tests/test_e2e_robot.py -v -m e2e
 
-(user_pat works once tfrs-auth PatCredential — cnb#1 — is released; set
-``THESEUS_CREDENTIAL__KIND=user_pat``, ``...__PAT``, ``...__ROBOT_PUBLIC_ID``.)
+(For CI/automation the OAuth path is also available — set ``THESEUS_CREDENTIAL__KIND=oauth``.)
 """
 
 from __future__ import annotations
