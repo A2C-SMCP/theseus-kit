@@ -16,6 +16,7 @@ from .config import OAuthConfig, TheseusSettings
 from .models import (
     ConfigDetail,
     ConfigSummary,
+    DraftValidateResponse,
     ListNodesResponse,
     LlmsDoc,
     PublishConfigResponse,
@@ -198,6 +199,7 @@ def _register_tools(mcp: FastMCP, settings: TheseusSettings) -> None:
     """Register the four progressive-disclosure read tools on *mcp*."""
     from .services.config_reader import ConfigReader
     from .services.draft_editor import DraftEditor
+    from .services.draft_validator import DraftValidator
     from .services.llms_doc_reader import LlmsDocReader
     from .services.publisher import ConfigPublisher
     from .services.template_saver import TemplateSaver
@@ -433,6 +435,27 @@ def _register_tools(mcp: FastMCP, settings: TheseusSettings) -> None:
         # Resource notification: summary (template count changed).
         _notify(ctx, "summary")
         return result
+
+    @mcp.tool(
+        name="validate_draft",
+        description=(
+            "Validate draft configuration before publishing."
+            " Use this BEFORE publish_config to check for validation errors."
+            " Call WITHOUT setting_id to run a full pre-release check on all"
+            " drafts — this is the recommended pre-publish validation."
+            " Call WITH setting_id to validate a specific node and its"
+            " recursive dependencies.  Returns per-node validation results"
+            " with pass/fail counts and detailed error messages.  A draft"
+            " must pass validation before it can be published.  Requires"
+            " config:write scope."
+        ),
+    )
+    async def validate_draft(
+        setting_id: int | None = None,
+    ) -> DraftValidateResponse:
+        validator = DraftValidator(robot_id=robot_id)
+        async with RobotClient.from_settings(settings) as client:
+            return await validator.validate(client, setting_id=setting_id)
 
 
 class _LazyOAuthTokenVerifier:

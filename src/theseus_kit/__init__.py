@@ -30,6 +30,9 @@ from theseus_kit.models import (
     ConfigSummary,
     CursorData,
     DraftTopology,
+    DraftValidateResponse,
+    DraftValidationErrorItem,
+    DraftValidationResult,
     ListNode,
     ListNodesResponse,
     LlmsDoc,
@@ -48,7 +51,14 @@ from theseus_kit.oauth import TheseusTokenVerifier, build_token_verifier
 from theseus_kit.resources import set_last_locator
 from theseus_kit.routing import RequestContext
 from theseus_kit.server import create_mcp_server
-from theseus_kit.services import ConfigPublisher, ConfigReader, DraftEditor, LlmsDocReader, TemplateSaver
+from theseus_kit.services import (
+    ConfigPublisher,
+    ConfigReader,
+    DraftEditor,
+    DraftValidator,
+    LlmsDocReader,
+    TemplateSaver,
+)
 from theseus_kit.transport import RobotClient, StaticTokenSource
 
 __version__ = "0.1.0.dev0"
@@ -91,6 +101,9 @@ __all__ = [
     "NodeKind",
     "ConfigDetail",
     "DraftTopology",
+    "DraftValidateResponse",
+    "DraftValidationErrorItem",
+    "DraftValidationResult",
     "TemplateResponse",
     "TopologyNode",
     "CursorData",
@@ -101,6 +114,7 @@ __all__ = [
     "SaveTemplateResponse",
     "compute_config_hash",
     "ConfigPublisher",
+    "DraftValidator",
     "TemplateSaver",
     "PublishNotConfirmedError",
     "PublishPreCheckError",

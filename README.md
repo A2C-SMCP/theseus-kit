@@ -56,7 +56,7 @@ export THESEUS_CREDENTIAL__SCOPES="config:read config:write"
 
 ## MCP 工具
 
-theseus-kit 提供 **8 个 MCP 工具**，覆盖配置的完整生命周期：
+theseus-kit 提供 **9 个 MCP 工具**，覆盖配置的完整生命周期：
 
 ### 只读工具
 
@@ -73,6 +73,7 @@ theseus-kit 提供 **8 个 MCP 工具**，覆盖配置的完整生命周期：
 | 工具 | 说明 | 所需 Scope |
 |------|------|------------|
 | `update_draft` | 更新草稿配置项，支持 `expected_hash` 乐观并发控制 | `config:write` |
+| `validate_draft` | 验证草稿配置是否满足上线条件（全量预检或指定节点），返回逐节点校验结果 | `config:write` |
 | `save_template` | 将草稿子树保存为可复用模板 | `config:write` |
 | `publish_config` | 将所有草稿发布到线上，要求 `acknowledge_publish=true` 显式确认 | `config:publish` |
 
@@ -88,6 +89,8 @@ get_config_detail         ← 读取：获取具体内容（含 content_hash）
 get_llms_doc              ← Schema：了解字段/校验规则
     ↓
 update_draft              ← 修改：带冲突保护的写入
+    ↓
+validate_draft            ← 校验：发布前预检
     ↓
 publish_config            ← 发布：显式确认 + root_hash 校验
 ```
@@ -200,12 +203,13 @@ OAuth 模式下的配置：
 ```
 ┌──────────────────────────────────────────┐
 │  MCP 表面层（server.py）                  │
-│  FastMCP · 8 工具 · 2 window:// 资源      │
+│  FastMCP · 9 工具 · 2 window:// 资源      │
 │  3 skill:// 资源 · OAuth PRM 路由         │
 ├──────────────────────────────────────────┤
 │  应用服务层（services/）                   │
 │  ConfigReader · DraftEditor · Publisher   │
-│  TemplateSaver · LlmsDocReader            │
+│  DraftValidator · TemplateSaver           │
+│  LlmsDocReader                            │
 ├──────────────────────────────────────────┤
 │  资源投影层（resources/ · skills/）        │
 │  window:// 实时快照 · skill:// 中文指南    │
@@ -305,7 +309,7 @@ OAuthConfig
 | `errors.py` | 类型化异常层级 + `map_exchange_error()` |
 | `redaction.py` | 令牌脱敏最后防线（PAT / JWT / OAuth token / code / state） |
 | `models.py` | `TFSResponse[T]` 信封 + 渐进披露数据模型 |
-| `services/` | `ConfigReader`、`DraftEditor`、`Publisher`、`TemplateSaver`、`LlmsDocReader` |
+| `services/` | `ConfigReader`、`DraftEditor`、`DraftValidator`、`Publisher`、`TemplateSaver`、`LlmsDocReader` |
 | `resources/` | `window://` 实时快照构建 |
 | `skills/` | `skill://` 静态中文指南 |
 

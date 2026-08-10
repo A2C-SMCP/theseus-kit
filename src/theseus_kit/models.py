@@ -380,6 +380,47 @@ class SaveTemplateResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+# -- validate_draft -----------------------------------------------------------
+
+
+class DraftValidationErrorItem(BaseModel):
+    """A single validation error for a draft configuration node."""
+
+    field: str = ""
+    message: str = ""
+    error_type: str = ""
+
+
+class DraftValidationResult(BaseModel):
+    """Validation result for one setting node."""
+
+    setting_id: int = 0
+    scene: str = ""
+    factory_name: str = ""
+    setting_name: str = ""
+    valid: bool = True
+    errors: list[DraftValidationErrorItem] = Field(default_factory=list)
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class DraftValidateResponse(BaseModel):
+    """``validate_draft`` response — aggregate validation result for a draft configuration tree.
+
+    Returned by ``POST /v1/factory/drafts/validate``. When *setting_id* is
+    omitted the server performs a full pre-release check (all drafts). When
+    provided, validates only the specified node and its recursive dependencies.
+    """
+
+    valid: bool = True
+    total_count: int = 0
+    pass_count: int = 0
+    fail_count: int = 0
+    results: list[DraftValidationResult] = Field(default_factory=list)
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 # -- Topology ----------------------------------------------------------------
 
 
