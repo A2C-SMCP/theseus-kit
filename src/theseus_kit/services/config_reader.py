@@ -27,6 +27,7 @@ from theseus_kit.models import (
     ConfigDetail,
     ConfigSummary,
     CursorData,
+    DraftTopology,
     ListMeta,
     ListNode,
     ListNodesResponse,
@@ -326,6 +327,21 @@ class ConfigReader:
             **{"_meta": ResponseMeta(fetched_at=now)},
         )
 
+    # -- get_topology ---------------------------------------------------------
+
+    async def get_topology(self, client: RobotClient) -> DraftTopology:
+        """Retrieve the draft configuration reference graph.
+
+        Calls ``GET /v1/factory/drafts/topology`` (TFRobotServer ≥ 0.3.0-rc2).
+        Returns a :class:`DraftTopology` with roots, orphans, and a compact
+        adjacency-list node map.
+        """
+        resp = await client.get_model(
+            f"{_FACTORY_BASE}/drafts/topology",
+            DraftTopology,
+        )
+        return resp.data
+
     async def _summarize_state(self, client: RobotClient, state: str) -> StateSummary:
         """Build a :class:`StateSummary` for one lifecycle state."""
         root_locator = f"{_LOCATOR_PREFIX}{state}"
@@ -352,10 +368,22 @@ class ConfigReader:
             except Exception:
                 count = None
 
+        # Draft: use topology endpoint for accurate dirty detection.
+        status: str | None = None
+        if state == "draft":
+            try:
+                topo = await self.get_topology(client)
+                if len(topo.roots) > 1:
+                    status = "dirty"
+            except Exception:
+                # Fall back to scene-count heuristic when topology is unavailable.
+                if len(scenes) > 1:
+                    status = "dirty"
+
         return StateSummary(
             present=True,
             root_locator=root_locator,
-            status="dirty" if state == "draft" and len(scenes) > 1 else None,
+            status=status,
             count=count,
         )
 

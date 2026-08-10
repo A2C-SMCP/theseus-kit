@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator, Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypeVar
 
 import httpx
 from pydantic import BaseModel
@@ -35,6 +35,8 @@ from .models import PaginatedList, TFSResponse, parse_tfs_response
 from .redaction import redact_secrets
 from .routing import RequestContext
 from .tokens import build_token_source
+
+_M = TypeVar("_M", bound=BaseModel)
 
 _FACTORY_DOCS_PREFIX = "/v1/factory/llm-docs/"
 
@@ -261,7 +263,7 @@ class RobotClient:
 
     # -- typed read helpers -------------------------------------------------
 
-    async def get_model(self, path: str, model_type: type[BaseModel]) -> Any:
+    async def get_model(self, path: str, model_type: type[_M]) -> TFSResponse[_M]:
         """GET *path* and parse the response as ``TFSResponse[model_type]``.
 
         Uses retry for transient failures (5xx / 429 / network).  The

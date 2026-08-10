@@ -23,6 +23,7 @@ from typing import Any, Generic, Literal, TypeVar
 from pydantic import BaseModel, ConfigDict, Field
 
 T = TypeVar("T")
+M = TypeVar("M", bound=BaseModel)  # bounded TypeVar for model-type-parameterised functions
 
 # ---------------------------------------------------------------------------
 # Response wrapper
@@ -76,8 +77,8 @@ class PaginatedList(BaseModel, Generic[T]):
 
 def parse_tfs_response(
     response: Any,  # httpx.Response — kept as Any to avoid import burden
-    model_type: type[BaseModel],
-) -> TFSResponse:  # type: ignore[type-arg]
+    model_type: type[M],
+) -> TFSResponse[M]:
     """Parse an ``httpx.Response`` body as a :class:`TFSResponse` wrapping *model_type*.
 
     Raises :class:`theseus_kit.errors.RobotApiError` when ``code != 200``.
@@ -375,6 +376,41 @@ class SaveTemplateResponse(BaseModel):
     template_id: int
     locator: str = ""
     meta: ResponseMeta = Field(alias="_meta")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+# -- Topology ----------------------------------------------------------------
+
+
+class TopologyNode(BaseModel):
+    """A single node in the draft configuration topology graph.
+
+    Field names are abbreviated for minimal token cost when consumed by LLM
+    agents.  The *c* (children) list is the adjacency-list out-edge set:
+    one-hop references, not transitively expanded.
+    """
+
+    s: str = ""  # scene (functional domain, e.g. ROBOT/BRAIN/LLM)
+    f: str = ""  # factory class name (e.g. EmployeeDraftSetting)
+    n: str = ""  # setting_name (user-assigned configuration instance name)
+    c: list[int] = Field(default_factory=list)  # children: direct setting_id references
+
+
+class DraftTopology(BaseModel):
+    """Draft configuration topology returned by ``GET /v1/factory/drafts/topology``.
+
+    Three top-level fields provide a complete reference graph of the draft
+    state in a compact, LLM-friendly format:
+
+    - *roots*: setting IDs not referenced by any other node.
+    - *orphans*: subset of *roots* that also have no outgoing references.
+    - *nodes*: all nodes keyed by setting_id (string, per JSON key constraint).
+    """
+
+    roots: list[int] = Field(default_factory=list)
+    orphans: list[int] = Field(default_factory=list)
+    nodes: dict[str, TopologyNode] = Field(default_factory=dict)
 
     model_config = ConfigDict(populate_by_name=True)
 
