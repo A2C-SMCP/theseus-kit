@@ -20,7 +20,8 @@ def build_skill_resource(skill_name: str, rel_path: str = "SKILL.md") -> str:
     Args:
         skill_name: Skill identifier (e.g. ``"analyze-config"``).  Legacy names
             (``"inspect-robot-config"``, ``"edit-robot-draft"``,
-            ``"publish-robot-config"``) are resolved to their new equivalents.
+            ``"publish-robot-config"``) are resolved to their new equivalents
+            (``"analyze-config"``, ``"tune-config"``, ``"publish-config"``).
         rel_path: Relative path within the skill package.  Defaults to
             ``"SKILL.md"`` (the main entry point).  Sub-resources use paths
             like ``"references/llmtext-strategy.md"``.

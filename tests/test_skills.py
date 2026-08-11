@@ -20,8 +20,8 @@ _SKILL_NS = "skill://com.a2c-smcp.theseus-kit"
 # New skill categories
 _NEW_SKILLS = (
     "analyze-config",
-    "create-config",
-    "update-config",
+    "manage-topology",
+    "tune-config",
     "save-template",
     "publish-config",
 )
@@ -29,7 +29,7 @@ _NEW_SKILLS = (
 # Legacy aliases (deprecated)
 _LEGACY_ALIASES = {
     "inspect-robot-config": "analyze-config",
-    "edit-robot-draft": "update-config",
+    "edit-robot-draft": "tune-config",
     "publish-robot-config": "publish-config",
 }
 
@@ -96,10 +96,10 @@ async def test_sub_resources_exist() -> None:
     expected_subs = [
         f"{_SKILL_NS}/analyze-config/references/llmtext-strategy.md",
         f"{_SKILL_NS}/analyze-config/references/needs-extraction.md",
-        f"{_SKILL_NS}/create-config/references/field-design.md",
-        f"{_SKILL_NS}/update-config/references/conflict-resolution.md",
-        f"{_SKILL_NS}/update-config/references/validation-strategy.md",
-        f"{_SKILL_NS}/save-template/references/template-design.md",
+        f"{_SKILL_NS}/manage-topology/references/factory-selection.md",
+        f"{_SKILL_NS}/tune-config/references/field-design.md",
+        f"{_SKILL_NS}/tune-config/references/conflict-resolution.md",
+        f"{_SKILL_NS}/tune-config/references/validation-strategy.md",
         f"{_SKILL_NS}/publish-config/references/preflight-deep-dive.md",
     ]
     for uri in expected_subs:
@@ -107,7 +107,7 @@ async def test_sub_resources_exist() -> None:
 
 
 async def test_resource_count() -> None:
-    """Total skill resources is 13 new + 3 legacy = 16 (plus 2 window resources = 18)."""
+    """Total skill resources is 5 main + 7 sub + 3 legacy = 15 (plus 2 window resources = 17)."""
     mcp = create_mcp_server(_settings())
     resources = await mcp.list_resources()
     skill_uris = [str(r.uri) for r in resources if str(r.uri).startswith(_SKILL_NS)]
@@ -167,40 +167,42 @@ async def test_read_analyze_config() -> None:
     assert "needs-extraction" in content
 
 
-async def test_read_create_config() -> None:
-    """create-config SKILL.md contains create_draft and LLMTEXT integration."""
+async def test_read_manage_topology() -> None:
+    """manage-topology SKILL.md contains create_draft, delete, and factory selection."""
     mcp = create_mcp_server(_settings())
-    result = await mcp.read_resource(f"{_SKILL_NS}/create-config")
+    result = await mcp.read_resource(f"{_SKILL_NS}/manage-topology")
     content = _read_text(result)
 
     assert "create_draft" in content
     assert "update_draft" in content
-    assert "validate_draft" in content
     assert "factory-catalog" in content
-    assert "field-design" in content
+    assert "factory-selection" in content
+    assert "tune-config" in content  # cross-reference
 
 
-async def test_read_update_config() -> None:
-    """update-config SKILL.md contains update_draft, expected_hash, and sub-resources."""
+async def test_read_tune_config() -> None:
+    """tune-config SKILL.md contains update_draft, expected_hash, and sub-resources."""
     mcp = create_mcp_server(_settings())
-    result = await mcp.read_resource(f"{_SKILL_NS}/update-config")
+    result = await mcp.read_resource(f"{_SKILL_NS}/tune-config")
     content = _read_text(result)
 
     assert "update_draft" in content
     assert "expected_hash" in content
     assert "conflict-resolution" in content
     assert "validation-strategy" in content
+    assert "field-design" in content
 
 
 async def test_read_save_template() -> None:
-    """save-template SKILL.md contains save_template and template design."""
+    """save-template SKILL.md contains save_template, naming conventions, and design principles."""
     mcp = create_mcp_server(_settings())
     result = await mcp.read_resource(f"{_SKILL_NS}/save-template")
     content = _read_text(result)
 
     assert "save_template" in content
     assert "get_template" in content
-    assert "template-design" in content
+    assert "好模板的特征" in content
+    assert "粒度选择" in content
 
 
 async def test_read_publish_config() -> None:
@@ -223,10 +225,10 @@ async def test_read_sub_resource() -> None:
     sub_uris = [
         f"{_SKILL_NS}/analyze-config/references/llmtext-strategy.md",
         f"{_SKILL_NS}/analyze-config/references/needs-extraction.md",
-        f"{_SKILL_NS}/create-config/references/field-design.md",
-        f"{_SKILL_NS}/update-config/references/conflict-resolution.md",
-        f"{_SKILL_NS}/update-config/references/validation-strategy.md",
-        f"{_SKILL_NS}/save-template/references/template-design.md",
+        f"{_SKILL_NS}/manage-topology/references/factory-selection.md",
+        f"{_SKILL_NS}/tune-config/references/field-design.md",
+        f"{_SKILL_NS}/tune-config/references/conflict-resolution.md",
+        f"{_SKILL_NS}/tune-config/references/validation-strategy.md",
         f"{_SKILL_NS}/publish-config/references/preflight-deep-dive.md",
     ]
     for uri in sub_uris:
@@ -340,11 +342,11 @@ async def test_non_existent_skill_returns_error() -> None:
 
 
 async def test_legacy_content_matches_new() -> None:
-    """Legacy inspect-robot-config content equals new analyze-config content."""
+    """Legacy edit-robot-draft content equals new tune-config content."""
     mcp = create_mcp_server(_settings())
 
-    legacy = _read_text(await mcp.read_resource(f"{_SKILL_NS}/inspect-robot-config"))
-    new = _read_text(await mcp.read_resource(f"{_SKILL_NS}/analyze-config"))
+    legacy = _read_text(await mcp.read_resource(f"{_SKILL_NS}/edit-robot-draft"))
+    new = _read_text(await mcp.read_resource(f"{_SKILL_NS}/tune-config"))
     assert legacy == new
 
 
@@ -386,7 +388,7 @@ def test_build_skill_resource_sub() -> None:
     """build_skill_resource with rel_path returns sub-resource content."""
     from theseus_kit.skills import build_skill_resource
 
-    content = build_skill_resource("analyze-config", "references/llmtext-strategy.md")
+    content = build_skill_resource("tune-config", "references/field-design.md")
     assert len(content) > 0
     assert "LLMTEXT" in content
 
@@ -395,9 +397,9 @@ def test_build_skill_resource_legacy() -> None:
     """build_skill_resource resolves legacy skill names."""
     from theseus_kit.skills import build_skill_resource
 
-    content = build_skill_resource("inspect-robot-config")
+    content = build_skill_resource("edit-robot-draft")
     assert len(content) > 0
-    assert "get_config_summary" in content
+    assert "update_draft" in content
 
 
 def test_build_skill_resource_unknown_name() -> None:
@@ -413,4 +415,4 @@ def test_build_skill_resource_unknown_sub_resource() -> None:
     from theseus_kit.skills import build_skill_resource
 
     with pytest.raises(ValueError, match="Unknown sub-resource"):
-        build_skill_resource("analyze-config", "references/nonexistent.md")
+        build_skill_resource("tune-config", "references/nonexistent.md")

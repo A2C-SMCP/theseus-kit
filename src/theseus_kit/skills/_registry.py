@@ -69,7 +69,7 @@ class _Registry:
 
 _LEGACY_ALIASES: dict[str, str] = {
     "inspect-robot-config": "analyze-config",
-    "edit-robot-draft": "update-config",
+    "edit-robot-draft": "tune-config",
     "publish-robot-config": "publish-config",
 }
 
@@ -79,9 +79,9 @@ _LEGACY_ALIASES: dict[str, str] = {
 
 def _load_all() -> dict[str, SkillDef]:
     """Import and index every skill def from the per-category modules."""
-    from . import _analyze_config, _create_config, _publish_config, _save_template, _update_config
+    from . import _analyze_config, _manage_topology, _publish_config, _save_template, _tune_config
 
-    modules = [_analyze_config, _create_config, _update_config, _save_template, _publish_config]
+    modules = [_analyze_config, _manage_topology, _publish_config, _save_template, _tune_config]
     result: dict[str, SkillDef] = {}
     for mod in modules:
         skill: SkillDef = mod.SKILL

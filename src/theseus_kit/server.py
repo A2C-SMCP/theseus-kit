@@ -107,7 +107,7 @@ def _register_skill_resources(mcp: FastMCP) -> None:
     # -- Legacy aliases (deprecated, lower priority) --
     _legacy_aliases = {
         "inspect-robot-config": "analyze-config",
-        "edit-robot-draft": "update-config",
+        "edit-robot-draft": "tune-config",
         "publish-robot-config": "publish-config",
     }
     for legacy, new_name in _legacy_aliases.items():
