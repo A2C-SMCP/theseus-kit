@@ -320,6 +320,29 @@ class LlmsDoc(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+# -- create_draft ------------------------------------------------------------
+
+
+class CreateDraftResponse(BaseModel):
+    """``create_draft`` response — newly created draft with content hash.
+
+    The *content_hash* is a SHA-256 digest of the deterministic JSON
+    serialization of *config* (same algorithm as :class:`UpdateDraftResponse`),
+    suitable for immediate use as ``expected_hash`` in subsequent
+    ``update_draft`` calls.
+    """
+
+    setting_id: int = 0
+    setting_name: str = ""
+    scene: str = ""
+    config: dict[str, Any] = Field(default_factory=dict)
+    content_hash: str = ""
+    revision: str | None = None
+    meta: ResponseMeta = Field(alias="_meta")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 # -- update_draft ------------------------------------------------------------
 
 

@@ -28,6 +28,7 @@ from theseus_kit.errors import (
 from theseus_kit.models import (
     ConfigDetail,
     ConfigSummary,
+    CreateDraftResponse,
     CursorData,
     DraftTopology,
     DraftValidateResponse,
@@ -54,6 +55,7 @@ from theseus_kit.server import create_mcp_server
 from theseus_kit.services import (
     ConfigPublisher,
     ConfigReader,
+    DraftCreator,
     DraftEditor,
     DraftValidator,
     LlmsDocReader,
@@ -100,6 +102,7 @@ __all__ = [
     "ListNode",
     "NodeKind",
     "ConfigDetail",
+    "CreateDraftResponse",
     "DraftTopology",
     "DraftValidateResponse",
     "DraftValidationErrorItem",
@@ -114,6 +117,7 @@ __all__ = [
     "SaveTemplateResponse",
     "compute_config_hash",
     "ConfigPublisher",
+    "DraftCreator",
     "DraftValidator",
     "TemplateSaver",
     "PublishNotConfirmedError",

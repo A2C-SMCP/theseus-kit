@@ -16,6 +16,7 @@ from .config import OAuthConfig, TheseusSettings
 from .models import (
     ConfigDetail,
     ConfigSummary,
+    CreateDraftResponse,
     DraftValidateResponse,
     ListNodesResponse,
     LlmsDoc,
@@ -36,37 +37,8 @@ _INSTRUCTIONS = (
 _WINDOW_NS = "window://com.a2c-smcp.theseus-kit"
 _SKILL_NS = "skill://com.a2c-smcp.theseus-kit"
 
-_SKILL_NAMES = (
-    "inspect-robot-config",
-    "edit-robot-draft",
-    "publish-robot-config",
-)
-
-_SKILL_DESCRIPTIONS: dict[str, str] = {
-    "inspect-robot-config": (
-        "How to explore and read TFRobot configuration: discover what"
-        " exists with get_config_summary, navigate the tree with"
-        " list_config_nodes, read bounded details with get_config_detail,"
-        " and consult runtime llms.txt schema documentation."
-    ),
-    "edit-robot-draft": (
-        "How to safely modify a draft configuration: read the robot's"
-        " runtime llms.txt schema first, check the current node with"
-        " get_config_detail, form safe modifications, call update_draft"
-        " with expected_hash for optimistic concurrency control, handle"
-        " validation errors, and verify results."
-    ),
-    "publish-robot-config": (
-        "How to publish draft configuration to production: run pre-checks"
-        " with get_config_summary, confirm the explicit acknowledge_publish"
-        " approval boundary, call publish_config with expected_root_hash,"
-        " and verify the online state updated."
-    ),
-}
-
 
 def _register_resources(mcp: FastMCP, settings: TheseusSettings) -> None:
-    """Register the two ``window://`` resources on *mcp*."""
     from .resources import build_recent, build_summary
     from .transport import RobotClient
 
@@ -75,10 +47,7 @@ def _register_resources(mcp: FastMCP, settings: TheseusSettings) -> None:
     @mcp.resource(
         f"{_WINDOW_NS}/config/summary",
         name="Config Summary",
-        description=(
-            "Compact robot identity and three-state configuration overview"
-            " (draft / template / online). Updates after every mutation."
-        ),
+        description="Compact robot identity and three-state configuration overview.",
         mime_type="application/json",
         annotations=Annotations(audience=["assistant"], priority=0.9),
     )
@@ -89,11 +58,7 @@ def _register_resources(mcp: FastMCP, settings: TheseusSettings) -> None:
     @mcp.resource(
         f"{_WINDOW_NS}/config/recent",
         name="Config Recent Detail",
-        description=(
-            "The most recently opened configuration detail (via"
-            " get_config_detail). Returns a clear empty state when no detail"
-            " has been opened yet."
-        ),
+        description="The most recently opened configuration detail.",
         mime_type="application/json",
         annotations=Annotations(audience=["assistant"], priority=0.8),
     )
@@ -102,28 +67,80 @@ def _register_resources(mcp: FastMCP, settings: TheseusSettings) -> None:
             return await build_recent(client, robot_id)
 
 
-def _register_skill_resources(mcp: FastMCP) -> None:
-    """Register the three ``skill://`` resources on *mcp*."""
+def _make_skill_reader(skill_name: str, rel_path: str) -> Callable[[], str]:
+    """Return a zero-arg callable that reads *skill_name*/*rel_path*.
+
+    Uses a factory function so each call creates its own closure scope,
+    avoiding the Python loop-variable-late-binding footgun.
+    """
     from .skills import build_skill_resource
 
-    for skill_name in _SKILL_NAMES:
+    def _reader() -> str:
+        return build_skill_resource(skill_name, rel_path)
 
-        def _make_handler(name: str = skill_name) -> Callable[[], str]:
-            def _reader() -> str:
-                return build_skill_resource(name)
+    return _reader
 
-            return _reader
 
-        handler = _make_handler()
+def _register_skill_resources(mcp: FastMCP) -> None:
+    """Register all skill:// resources (main + sub) on *mcp*."""
+    from .skills import SkillRegistry
+
+    for skill in SkillRegistry.all():
+        # -- Main entry (SKILL.md) --
+        main_rel = "SKILL.md"
+
+        _reader = _make_skill_reader(skill.name, main_rel)
 
         mcp.resource(
-            f"{_SKILL_NS}/{skill_name}",
-            name=f"Skill: {skill_name}",
-            description=_SKILL_DESCRIPTIONS[skill_name],
+            f"{_SKILL_NS}/{skill.name}",
+            name=f"Skill: {skill.name}",
+            description=skill.description,
             mime_type="text/markdown",
             annotations=Annotations(audience=["assistant"], priority=0.7),
             meta={"source": "resources"},
-        )(handler)
+        )(_reader)
+
+        # -- Sub-resources (references/*.md) --
+        for rel_path in skill.sub_resources:
+            _register_skill_sub_resource(mcp, skill.name, rel_path)
+
+    # -- Legacy aliases (deprecated, lower priority) --
+    _legacy_aliases = {
+        "inspect-robot-config": "analyze-config",
+        "edit-robot-draft": "update-config",
+        "publish-robot-config": "publish-config",
+    }
+    for legacy, new_name in _legacy_aliases.items():
+        new_skill = SkillRegistry.get(new_name)
+        if new_skill is None:
+            continue
+
+        _reader = _make_skill_reader(new_name, "SKILL.md")
+
+        mcp.resource(
+            f"{_SKILL_NS}/{legacy}",
+            name=f"Skill: {legacy} (legacy)",
+            description=new_skill.description,
+            mime_type="text/markdown",
+            annotations=Annotations(audience=["assistant"], priority=0.6),
+            meta={
+                "source": "resources",
+                "deprecated": True,
+                "migrated_to": new_name,
+            },
+        )(_reader)
+
+
+def _register_skill_sub_resource(mcp: FastMCP, skill_name: str, rel_path: str) -> None:
+    """Register a single sub-resource for a skill."""
+    mcp.resource(
+        f"{_SKILL_NS}/{skill_name}/{rel_path}",
+        name=f"Skill Ref: {skill_name}/{rel_path}",
+        description=f"Reference for {skill_name}: {rel_path}",
+        mime_type="text/markdown",
+        annotations=Annotations(audience=["assistant"], priority=0.6),
+        meta={"source": "resources"},
+    )(_make_skill_reader(skill_name, rel_path))
 
 
 def create_mcp_server(settings: TheseusSettings | None = None) -> FastMCP:
@@ -198,6 +215,7 @@ def _notify(ctx: Context[Any, Any, Any] | None, resource: str) -> None:
 def _register_tools(mcp: FastMCP, settings: TheseusSettings) -> None:
     """Register the four progressive-disclosure read tools on *mcp*."""
     from .services.config_reader import ConfigReader
+    from .services.draft_creator import DraftCreator
     from .services.draft_editor import DraftEditor
     from .services.draft_validator import DraftValidator
     from .services.llms_doc_reader import LlmsDocReader
@@ -336,6 +354,39 @@ def _register_tools(mcp: FastMCP, settings: TheseusSettings) -> None:
         reader = LlmsDocReader()
         async with RobotClient.from_settings(settings) as client:
             return await reader.get_doc(client, path=path, max_bytes=max_bytes)
+
+    @mcp.tool(
+        name="create_draft",
+        description=(
+            "Create a new draft configuration setting."
+            " Use this FIRST when you need to add a new configuration node"
+            " (a new LLM provider, a new tool, a new brain, etc.)."
+            " Pass the scene (functional domain like LLM/BRAIN/TOOL),"
+            " factory_name (as it appears in the LLMTEXT factory catalog),"
+            " and a user-assigned setting_name. Optionally pass an initial"
+            " config dictionary; otherwise the draft is created with factory"
+            " defaults. Returns a setting_id and content_hash suitable for"
+            " immediate use in update_draft. Requires config:write scope."
+        ),
+    )
+    async def create_draft(
+        scene: str,
+        factory_name: str,
+        setting_name: str,
+        config: dict[str, Any] | None = None,
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> CreateDraftResponse:
+        creator = DraftCreator(robot_id=robot_id)
+        async with RobotClient.from_settings(settings) as client:
+            result = await creator.create(
+                client,
+                scene=scene,
+                factory_name=factory_name,
+                setting_name=setting_name,
+                config=config,
+            )
+        _notify(ctx, "summary")
+        return result
 
     @mcp.tool(
         name="update_draft",
