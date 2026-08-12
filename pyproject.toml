@@ -31,7 +31,7 @@ Issues = "https://github.com/A2C-SMCP/theseus-kit/issues"
 theseus-kit = "theseus_kit.server:main"
 
 [build-system]
-requires = ["hatchling<1.28"]
+requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [dependency-groups]
