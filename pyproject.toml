@@ -1,6 +1,6 @@
 [project]
 name = "theseus-kit"
-version = "0.1.0.dev0"
+version = "0.1.0"
 description = "MCP server for safely inspecting, editing, templating, and publishing TFRobot configurations"
 readme = "README.md"
 requires-python = ">=3.11,<4.0"
