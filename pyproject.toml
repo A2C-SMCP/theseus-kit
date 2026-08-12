@@ -31,7 +31,7 @@ Issues = "https://github.com/A2C-SMCP/theseus-kit/issues"
 theseus-kit = "theseus_kit.server:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling<1.28"]
 build-backend = "hatchling.build"
 
 [dependency-groups]
@@ -48,7 +48,7 @@ test = [
 build = [
     "bump-my-version>=1.2.0,<2.0.0",
     "packaging>=25.0,<27.0",
-    "twine>=6.2.0,<7.0.0",
+    "twine>=7.0.0,<8.0.0",
 ]
 
 [tool.hatch.build.targets.wheel]
