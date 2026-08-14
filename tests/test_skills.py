@@ -112,6 +112,7 @@ async def test_sub_resources_exist() -> None:
         f"{_SKILL_NS}/theseus/references/persona-format.md",
         f"{_SKILL_NS}/theseus/references/workspace-layout.md",
         f"{_SKILL_NS}/theseus/references/context-isolation.md",
+        f"{_SKILL_NS}/theseus/references/plan-format.md",
         f"{_SKILL_NS}/tune-config/references/field-design.md",
         f"{_SKILL_NS}/tune-config/references/conflict-resolution.md",
         f"{_SKILL_NS}/tune-config/references/validation-strategy.md",
@@ -129,12 +130,12 @@ async def test_sub_resources_exist() -> None:
 
 
 async def test_resource_count() -> None:
-    """Total skill resources is 12 main + 12 SKILL.md subs + 18 sub + 3 legacy = 45 (plus 2 window = 47)."""
+    """Total skill resources is 12 main + 12 SKILL.md subs + 19 sub + 3 legacy = 46 (plus 2 window = 48)."""
     mcp = create_mcp_server(_settings())
     resources = await mcp.list_resources()
     skill_uris = [str(r.uri) for r in resources if str(r.uri).startswith(_SKILL_NS)]
-    # 12 main + 12 SKILL.md subs + 18 sub + 3 legacy = 45
-    assert len(skill_uris) == 45, f"Expected 45 skill resources, got {len(skill_uris)}: {skill_uris}"
+    # 12 main + 12 SKILL.md subs + 19 sub + 3 legacy = 46
+    assert len(skill_uris) == 46, f"Expected 46 skill resources, got {len(skill_uris)}: {skill_uris}"
 
 
 # -- Resource annotations ---------------------------------------------------
@@ -370,6 +371,7 @@ async def test_read_theseus() -> None:
     assert "persona-format" in content  # 画像规范格式引用
     assert "workspace-layout" in content  # 布局细则引用
     assert "context-isolation" in content  # 上下文隔离与交接引用
+    assert "plan-format" in content  # 计划文件规范格式引用
     assert "安全不变量" in content  # 凭证不出进程、发布显式
 
 
@@ -402,6 +404,9 @@ async def test_read_plan_config() -> None:
     assert "validate_tfonto.py" in content  # validation gate
     assert "context-isolation" in content  # host-isolation mechanism resolved
     assert "toolchain.yaml" in content  # toolchain selection artifact
+    assert "in-progress" in content  # plan filename carries status
+    assert "并行" in content  # no parallel in-progress plans
+    assert "plan-format" in content  # plan format spec reference
     assert "自然语言" in content  # persona tool needs are plain-language; conversion here
     assert "Marketplace" in content  # source 1: official marketplace
     assert "WebSearch" in content  # sources 2/3: open-world search
@@ -421,6 +426,9 @@ async def test_read_apply_config_plan() -> None:
     assert "validate_draft" in content  # validation gate
     assert "publish_config" in content  # explicit publish negotiation
     assert "不可逆" in content  # publish is irreversible
+    assert "in-progress" in content  # reads the single in-progress plan
+    assert "强制完成" in content  # force-complete → aborted, user-confirmed
+    assert "失败即停" in content  # item failure stops execution, user consulted
 
 
 async def test_read_enhance() -> None:
@@ -469,7 +477,7 @@ async def test_read_context_isolation() -> None:
 
 
 async def test_read_workspace_layout() -> None:
-    """workspace-layout details the configs/ artifact design (naming, gates, lifecycle)."""
+    """workspace-layout details the configs/ artifact design and the plan status-in-filename rule."""
     mcp = create_mcp_server(_settings())
     result = await mcp.read_resource(f"{_SKILL_NS}/theseus/references/workspace-layout.md")
     content = _read_text(result)
@@ -479,9 +487,34 @@ async def test_read_workspace_layout() -> None:
     assert "validate_tfonto.py" in content  # .tfo gate
     assert "yaml.safe_load" in content  # YAML/JSON gate
     assert "plans/" in content
+    assert "in-progress" in content  # plan filename carries completion status
+    assert "done" in content  # completed status
+    assert "aborted" in content  # force-completed status
+    assert "强制完成" in content  # force-complete needs user confirmation
+    assert "并行" in content  # at most one in-progress plan
     assert "scripts/" in content
     assert "tmp/" in content
     assert "中间物" in content  # artifacts are intermediate, no auto-sync
+    assert "plan-format" in content  # plan format spec pointer
+
+
+async def test_read_plan_format() -> None:
+    """plan-format: 7 fixed sections, artifact-granularity item table, fail-fast status write-back."""
+    mcp = create_mcp_server(_settings())
+    result = await mcp.read_resource(f"{_SKILL_NS}/theseus/references/plan-format.md")
+    content = _read_text(result)
+
+    assert "目标" in content  # section 1
+    assert "依据" in content  # section 2: persona chapters + configs artifacts
+    assert "当前配置基线" in content  # section 3: progressive-disclosure survey snapshot
+    assert "操作序列" in content  # section 4: item table
+    assert "校验门" in content  # section 5: stage-level gates
+    assert "发布摘要" in content  # section 6: apply-stage summary
+    assert "落实回执" in content  # section 7: apply-stage receipts
+    assert "产出物粒度" in content  # item granularity decision
+    assert "只追加不重排" in content  # stable item numbering
+    assert "失败即停" in content  # fail-fast, discuss with user
+    assert "待执行" in content  # item status vocabulary
 
 
 async def test_read_capability_layer() -> None:

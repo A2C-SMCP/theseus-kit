@@ -28,7 +28,7 @@ description: 阶段二——把已确认的机器人画像转换为结构化配�
 ## 输入 / 输出
 
 - 输入：`<slug>/<slug>.md`（只消费经用户确认的内容，含「变更记录」中的未落实变更）
-- 输出：`configs/` 结构化工件（.tfo / YAML / JSON，含工具链选型 `toolchain.yaml`）+ `plans/<slug>-<日期>-<主题>.md` 计划文件（一次编辑一份）
+- 输出：`configs/` 结构化工件（.tfo / YAML / JSON，含工具链选型 `toolchain.yaml`）+ `plans/<YYYY-MM-DD>-<主题>-in-progress.md` 计划文件（文件名带状态，plans/ 至多一份进行中）
 
 ## 流程
 
@@ -43,16 +43,16 @@ description: 阶段二——把已确认的机器人画像转换为结构化配�
 4. **其余配置转换**：岗位职责 / 工作范围 → 对应配置项的 YAML/JSON 工件（命名 `configs/<主题>.yaml`），字段形状以目标配置项为准
 5. **渐进披露调研**：当前真实配置通过 MCP 工具读取——先 `get_config_summary` 看拓扑，再 `list_config_nodes` / `get_config_detail` 展开**有必要编辑**的节点，`get_config_value` 取具体值。逐步展开，绝不整树读入
 6. **复杂配置写脚本**：需要批量/结构化处理时写脚本（TFOnto 校验即先例）；脚本放工作区 `scripts/`、临时产物放 `tmp/`，执行前经用户确认，报错迭代放进宿主系统的隔离上下文（布局与隔离机制见 theseus 的 `references/workspace-layout.md` / `references/context-isolation.md`；A2C 的 `${TFROBOT_SKILL_DIR}` 只适用于技能包内脚本）
-7. **固化计划**：产出 `plans/` 计划文件，供阶段三逐条执行
+7. **固化计划**：落盘前先查 plans/——已有未完成计划须先完成（或经用户确认强制完成），**不允许并行修改**；按 theseus 技能的 `references/plan-format.md` 规范格式产出 `plans/<YYYY-MM-DD>-<主题>-in-progress.md`，供阶段三逐条执行
 
 ## 渐进披露（本技能最关键的两处细节，TODO）
 
 - **真实配置的渐进披露**（流程步骤 5）：拓扑 → 展开的具体操作序列、上下文预算的逐级用法（8 KiB 默认 / 32 KiB 硬上限）、draft/template/online 三态的选择时机**待单独讨论后固化**；过渡期以 analyze-config 技能的 LLMTEXT 策略为参照。上下文管理模式已定：大体积调研放进宿主系统的隔离机制（theseus/references/context-isolation.md），调研结论物化回工作区
 - **TFOnto 本体的渐进披露**：当前本体结构定义如何借助 TFS Action 渐进式披露，定位「哪里需要改、如何改」，步骤化处理的细节**待单独讨论后固化**；过渡期以 write-tfonto 的校验器 + 两个范例为参照
 
-## Plan 文件格式（TODO）
+## Plan 文件格式
 
-字段与结构待设计（建议包含：目标 / 依据画像章节 / 涉及配置节点清单 / 操作序列 / 校验门 / 回滚），细节阶段固化。
+已固化：theseus 技能的 `references/plan-format.md`——7 章节 + 操作序列条目表（产出物粒度、状态回写、失败即停）。
 
 ## 交接
 

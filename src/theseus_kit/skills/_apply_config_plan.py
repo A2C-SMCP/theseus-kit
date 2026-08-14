@@ -23,7 +23,7 @@ description: 阶段三——把阶段二已确认的计划文件落实到 Draft�
 
 ## 流程
 
-1. **读计划、建 SubTask**：读 `plans/<计划文件>`，把计划条目转成 SubTask 清单；每完成一条**回写进度到计划文件**（可追溯，中断可续）
+1. **读计划、建 SubTask**：读 `plans/*-in-progress.md`（进行中的计划，至多一份；命名与状态约定见 theseus 技能的 `references/workspace-layout.md`，格式规范见其 `references/plan-format.md`），把计划条目转成 SubTask 清单；每完成一条**回写进度到计划文件**（可追溯，中断可续）
 2. **落到 Draft**：按计划逐条执行——`create_draft`（见 manage-topology 技能）/ `update_draft`（见 tune-config 技能，注意 `expected_hash` 冲突与 field-design / conflict-resolution / validation-strategy 参考）；本体定义变更经平台导入入口落 Draft
 3. **Template 决策**：与用户商议这段配置是否值得存模板（save-template 技能：好模板特征、粒度选择）——值得才 `save_template`，**不默认存**
 4. **校验**：`validate_draft` + 相关技能自检；失败逐条修正后重跑，**校验不过不进入发布商议**
@@ -32,7 +32,9 @@ description: 阶段三——把阶段二已确认的计划文件落实到 Draft�
 ## 纪律
 
 - 计划外的不顺手改——发现计划外问题回阶段二补计划，不擅自扩范围
+- 失败即停：条目执行失败 → 标「失败（原因）」停在原地与用户商议（重试或回阶段二补计划），不擅自跳过
 - 每步结果回写计划文件（可追溯）
+- 计划收尾也改文件名：全部条目执行完 → `done`；经用户确认放弃剩余条目 → `aborted`（强制完成）——状态永远在文件名上可见
 - 发布永远是与用户的商议结果，绝不自动触发
 
 ## 上游

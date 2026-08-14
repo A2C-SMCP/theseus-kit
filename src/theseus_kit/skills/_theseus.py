@@ -39,7 +39,7 @@ description: TFRobot 配置工作流总纲——三阶段流水线（机器人�
 ~/.theseus/workspaces/<slug>/
   <slug>.md          # 机器人画像（规范格式见 references/persona-format.md）
   configs/           # 结构化配置工件（.tfo / YAML / JSON）
-  plans/             # 修改计划文件（一次编辑一份）
+  plans/             # 修改计划（文件名带状态，至多一份进行中）
   scripts/           # 本机器人专用脚本（复杂转换 / 校验）
   tmp/               # 临时产物（可随时清空，不进入交接）
 ```
@@ -69,6 +69,7 @@ description: TFRobot 配置工作流总纲——三阶段流水线（机器人�
 
 - `references/persona-format.md` — 机器人画像规范格式（阶段一交付物标准，含「变更记录」章节约定）
 - `references/workspace-layout.md` — 工作区布局细则：configs/ 工件命名与校验门槛、plans/、scripts/、tmp/
+- `references/plan-format.md` — 计划文件规范格式（阶段二交付物标准：7 章节 + 操作序列条目表 + 状态回写）
 - `references/context-isolation.md` — 上下文隔离与交接：隔离点位 + 各宿主系统指引（Claude Code / Codex / TFRobotServer Chain）
 """,
         "references/persona-format.md": """# 机器人画像规范格式（persona.md）
@@ -104,7 +105,7 @@ persona-interview 技能的 `references/persona-example.md` 五部分结构是�
 ~/.theseus/workspaces/<slug>/    # slug = RobotPublicID 的 slug 化（: → -）
   <slug>.md                      # 机器人画像（规范：persona-format.md）
   configs/                       # 结构化配置工件（本文件重点）
-  plans/                         # 修改计划（一次编辑一份）
+  plans/                         # 修改计划（文件名带状态，至多一份进行中）
   scripts/                       # 本机器人专用脚本（复杂转换 / 校验）
   tmp/                           # 临时产物（可随时清空，不进入交接）
 ```
@@ -147,9 +148,13 @@ persona-interview 技能的 `references/persona-example.md` 五部分结构是�
 
 ## plans/ —— 修改计划
 
-- 一次编辑一份：`plans/<YYYY-MM-DD>-<主题>.md`
-- 计划文件按文件名引用 configs 工件；apply-config-plan 逐条回写进度
-- （TODO: Plan 文件格式的字段与结构在 plan-config 细节阶段设计）
+- **完成状态在文件名上**：`plans/<YYYY-MM-DD>-<主题>-<状态>.md`，状态三选一：
+  - `in-progress` — 进行中（同一时刻至多一份）
+  - `done` — 全部条目执行完毕（apply-config-plan 收尾时改名）
+  - `aborted` — 经用户确认**强制完成**（剩余条目放弃执行，计划归档）
+- **不允许并行修改**：新建计划前先检查 plans/——存在未完成的计划（`*.in-progress.md`），必须先完成它（执行完剩余条目，或经用户确认强制完成 → 改 `aborted`），之后才允许开新计划
+- 计划文件按文件名引用 configs 工件；apply-config-plan 逐条回写进度，状态变化通过改名体现
+- 计划文件规范格式（7 章节、条目表与状态回写、失败即停）见 `references/plan-format.md`
 
 ## scripts/ 与 tmp/
 
@@ -213,6 +218,64 @@ model: sonnet
 ## 交接协议（任何机制通用）
 
 新上下文启动第一件事：读 theseus 总纲 + 工作区画像 + 相关计划文件；结束后把结论写回工作区。**不依赖会话记忆，只依赖文件。**
+""",
+        "references/plan-format.md": """# 计划文件规范格式（plan-format）
+
+> 阶段二交付物的唯一规范：plan-config 按本格式固化 plans/ 计划文件，apply-config-plan 按本格式读写、逐条回写进度。文件名约定（日期/主题/状态）见 workspace-layout.md。
+
+## 设计立场
+
+计划文件是阶段二 → 阶段三的交接物，同时是执行台账与审计依据：每条操作挂着「为什么」（画像章节 + configs 工件），进度逐条回写文件——谁接手都能从文件续上。
+
+## 固定章节（7 个）
+
+1. **目标** — 改什么、达成什么效果（用户语言）；首版配置引画像首版章节，迭代引「变更记录」条目
+2. **依据** — 画像章节 + 用到的 configs 工件（文件名 + 校验状态，不粘贴内容）
+3. **当前配置基线** — 渐进披露调研结论：改哪些节点、当前 draft / template / online、哪些「不动（参照）」；基线是时点快照，apply 以实际当前值为准
+4. **操作序列** — 条目表，产出物粒度：一个条目 = 一个可勾销产出（建 Draft / 本体导入 / 某节点调参），不是一次工具调用；编号 P1、P2……只追加不重排
+5. **校验门（阶段级）** — 工件门槛已过 → validate_draft 通过才商议发布 → 发布需用户 ack；发布后不可逆，回滚 = 新计划
+6. **发布摘要**（apply 填写）— 变更摘要 + 影响面，由落实回执汇总，发布商议用
+7. **落实回执**（apply 填写）— 逐条结果 + 画像「变更记录」哪些条目已落实
+
+## 操作序列条目表
+
+| 列 | 内容 |
+|---|---|
+| # | 稳定编号（补条目只追加） |
+| 操作 | 工具 + 目标节点 |
+| 依据 | configs 工件 / 画像章节 |
+| 校验 | 本条目通过标准 |
+| 回滚 | 如何撤销（弃 Draft / expected_hash 回改） |
+| 状态 | 待执行 / 执行中 / 已完成 / 跳过（理由）/ 失败（原因） |
+
+状态回写：apply 每完成一条只动状态列；**失败即停**——标「失败（原因）」停在原地与用户商议（重试或回阶段二补计划）。全部收尾后按 workspace-layout 改文件名状态（done / aborted）。
+
+## 最小示例
+
+```markdown
+# Plan: 2026-08-14-调参
+
+## 目标
+按画像变更记录第 3 条（降低答疑深度）调整答疑参数。
+
+## 依据
+- 画像：`org-10001.md`「变更记录」2026-08-12 条目
+- 工件：`configs/tuning.yaml`（yaml.safe_load: passed）
+
+## 操作序列
+| # | 操作 | 依据 | 校验 | 回滚 | 状态 |
+|---|---|---|---|---|---|
+| P1 | update_draft：调低答疑深度 | configs/tuning.yaml | 数值范围校验 | expected_hash 回改 | 待执行 |
+
+## 校验门
+工件门槛已过；validate_draft 通过才商议发布；发布需用户 ack。
+
+## 发布摘要（apply 填写）
+（待写）
+
+## 落实回执（apply 填写）
+（待写）
+```
 """,
     },
 )
