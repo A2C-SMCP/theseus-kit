@@ -13,10 +13,14 @@ Covers, through the official SDK:
 1. version handshake negotiation (a2c_version visible in the office),
 2. skill staging — ``client:get_skills`` inventory + ``client:get_skill``
    for the main SKILL.md and sub-resources (mode C "resources"),
-3. tool inventory via ``client:get_tools``,
-4. the tool-call chain (``client:tool_call`` → real tool → real robot HTTP)
+3. the Agent execution contract — ``A2CSkillRef.path`` is a real absolute
+   staged package dir whose ``scripts/validate_tfonto.py`` is byte-identical
+   to the shipped script and executes against the staged example
+   (``${TFROBOT_SKILL_DIR}`` renders to this path, skill.md §9.3/§9.4),
+4. tool inventory via ``client:get_tools``,
+5. the tool-call chain (``client:tool_call`` → real tool → real robot HTTP)
    including the X-TF-* routing contract observed on the fake robot,
-5. ``client:get_resources`` passthrough with cursor pagination.
+6. ``client:get_resources`` passthrough with cursor pagination.
 
 Gated behind ``THESEUS_E2E=1`` like the robot e2e suite; run with::
 
@@ -32,22 +36,20 @@ Known acceptance findings (tracked for the debug phase, not fixed here):
 
 from __future__ import annotations
 
-import asyncio
 import base64
+import hashlib
 import os
+import subprocess
 import sys
+from importlib.resources import files
 from pathlib import Path
 
 import pytest
 from a2c_smcp import PROTOCOL_VERSION
-from a2c_smcp.agent import AsyncSMCPAgentClient, DefaultAgentAuthProvider
-from a2c_smcp.computer import Computer
-from a2c_smcp.computer.mcp_clients.model import StdioServerConfig, ToolMeta
-from a2c_smcp.computer.socketio.client import SMCPComputerClient
-from a2c_smcp.smcp import JOIN_OFFICE_EVENT, SMCP_NAMESPACE
-from mcp import StdioServerParameters
+from a2c_smcp.agent import AsyncSMCPAgentClient
 
 from tests._fakeserver import FakeRobotServer
+from tests.e2e._trio import KIT_BUNDLE_ID, boot_kit_trio
 
 pytestmark = [pytest.mark.e2e]
 
@@ -63,28 +65,16 @@ _SKILLS = (
     "write-tfonto",
 )
 
-_KIT_BUNDLE_ID = "theseus-kit"  # auto-derived from StdioServerConfig name
+_WRITE_TFONTO_FILES = (
+    "SKILL.md",
+    "references/tfonto-format.md",
+    "references/capability-layer.md",
+    "references/teacher-math-example.md",
+    "references/teacher-math.tfo",
+    "scripts/validate_tfonto.py",
+)
 
 _skip_guard = pytest.mark.skipif(not _E2E_ENABLED, reason="set THESEUS_E2E=1 to run the SDK e2e suite")
-
-
-def _stdio_cfg(script: Path) -> StdioServerConfig:
-    """Real stdio MCP config; auto_apply skips the tool-call confirmation.
-
-    The THESEUS_* settings are passed as the explicit subprocess env — the
-    SDK's stdio spawn path does not reliably inherit the parent environment
-    (observed: the kit subprocess silently fell back to the repo's real
-    ``.env`` staging config instead of the fixture's monkeypatched vars).
-    """
-    return StdioServerConfig(
-        name=_KIT_BUNDLE_ID,
-        server_parameters=StdioServerParameters(
-            command=sys.executable,
-            args=[str(script)],
-            env={k: v for k, v in os.environ.items()},
-        ),
-        default_tool_meta=ToolMeta(auto_apply=True),
-    )
 
 
 async def _skill_text(agent: AsyncSMCPAgentClient, computer: str, name: str, rel_path: str | None = None) -> str:
@@ -116,40 +106,21 @@ async def _skill_text(agent: AsyncSMCPAgentClient, computer: str, name: str, rel
 @_skip_guard
 async def test_kit_full_chain(signaling_endpoint: str, fake_robot: FakeRobotServer, tmp_path: Path) -> None:
     office_id = "e2e-kit-office"
-    computer = Computer(
-        name="comp-e2e",
-        mcp_servers={_stdio_cfg(Path(__file__).with_name("_kit_stdio_runner.py"))},
-        skill_home=tmp_path / "skills",
-    )
-    comp_client = SMCPComputerClient(computer=computer)
-    agent = AsyncSMCPAgentClient(
-        auth_provider=DefaultAgentAuthProvider(agent_id="e2e-agent", office_id=office_id),
-    )
-
-    try:
-        # -- 1. Connect: Agent + Computer join the same office -----------------
-        await agent.connect_to_server(signaling_endpoint, namespace=SMCP_NAMESPACE)
-        await agent.emit(
-            JOIN_OFFICE_EVENT,
-            {"role": "agent", "office_id": office_id, "name": "e2e-agent"},
-            namespace=SMCP_NAMESPACE,
-        )
-        await computer.boot_up()
-        await comp_client.connect(signaling_endpoint, namespaces=[SMCP_NAMESPACE])
-        await comp_client.join_office(office_id)
+    async with boot_kit_trio(
+        signaling_endpoint, agent_id="e2e-agent", office_id=office_id, skill_home=tmp_path / "skills"
+    ) as (computer, comp_client, agent):
         assert agent.connected is True
         assert comp_client.connected is True
-        await asyncio.sleep(0.5)  # join visibility settles
 
-        # -- 2. Version handshake negotiated and reported ----------------------
+        # -- 1. Version handshake negotiated and reported ----------------------
         computers = await agent.get_computers_in_office(office_id)
         assert computers, "computer session must be discoverable in the office"
         assert all(c.get("a2c_version") == PROTOCOL_VERSION for c in computers), (
             f"negotiated version must be {PROTOCOL_VERSION}, got {[c.get('a2c_version') for c in computers]}"
         )
 
-        # -- 3. Skill staging: inventory + progressive disclosure --------------
-        skills_ret = await agent.get_skills("comp-e2e")
+        # -- 2. Skill staging: inventory + progressive disclosure --------------
+        skills_ret = await agent.get_skills(computer.name)
         names = {s["name"] for s in skills_ret["skills"]}
         for skill in _SKILLS:
             assert any(n.endswith(f":{skill}") for n in names), f"skill {skill!r} not staged; inventory={sorted(names)}"
@@ -159,34 +130,34 @@ async def test_kit_full_chain(signaling_endpoint: str, fake_robot: FakeRobotServ
         def _skill_name(skill: str) -> str:
             return next(n for n in names if n.endswith(f":{skill}"))
 
-        persona = await _skill_text(agent, "comp-e2e", _skill_name("persona-interview"))
+        persona = await _skill_text(agent, computer.name, _skill_name("persona-interview"))
         assert "能力草图" in persona, "persona-interview SKILL.md must cover the capability sketch"
         # SDK serves the staged body with YAML frontmatter stripped (a blank
         # line may remain after the closing fence).
         assert persona.lstrip().startswith("# Persona Interview"), "SKILL.md body must be frontmatter-stripped"
 
         cap_layer = await _skill_text(
-            agent, "comp-e2e", _skill_name("write-tfonto"), rel_path="references/capability-layer.md"
+            agent, computer.name, _skill_name("write-tfonto"), rel_path="references/capability-layer.md"
         )
         assert "判断口诀" in cap_layer, "capability-layer reference must carry the decision mnemonic"
 
         # .py is outside the spec's §6.4 text table, so the SDK routes it via
         # the blob sideband — exercises the client:get_blob drain path.
         validator = await _skill_text(
-            agent, "comp-e2e", _skill_name("write-tfonto"), rel_path="scripts/validate_tfonto.py"
+            agent, computer.name, _skill_name("write-tfonto"), rel_path="scripts/validate_tfonto.py"
         )
         assert "validate" in validator.lower(), "validator script must be staged with real content"
 
-        # -- 4. Tool inventory ---------------------------------------------------
-        tools_ret = await agent.get_tools_from_computer("comp-e2e")
+        # -- 3. Tool inventory ---------------------------------------------------
+        tools_ret = await agent.get_tools_from_computer(computer.name)
         tool_names = {t["name"] for t in tools_ret["tools"]}
         # The Computer composes tool names as "<bundle_id>__<tool>".
-        assert f"{_KIT_BUNDLE_ID}__get_llms_doc" in tool_names, f"get_llms_doc missing from tools: {sorted(tool_names)}"
+        assert f"{KIT_BUNDLE_ID}__get_llms_doc" in tool_names, f"get_llms_doc missing from tools: {sorted(tool_names)}"
 
-        # -- 5. Tool-call chain: real tool → real robot HTTP ---------------------
+        # -- 4. Tool-call chain: real tool → real robot HTTP ---------------------
         result = await agent.emit_tool_call(
-            computer="comp-e2e",
-            tool_name=f"{_KIT_BUNDLE_ID}__get_llms_doc",
+            computer=computer.name,
+            tool_name=f"{KIT_BUNDLE_ID}__get_llms_doc",
             params={"max_bytes": 1024},
             timeout=30,
         )
@@ -204,20 +175,73 @@ async def test_kit_full_chain(signaling_endpoint: str, fake_robot: FakeRobotServ
         # Credential exchange happened against the Manager endpoint first.
         assert fake_robot.token_posts(), "token exchange must precede robot reads"
 
-        # -- 6. get_resources passthrough: skill:// + window://, cursor-walked ---
+        # -- 5. get_resources passthrough: skill:// + window://, cursor-walked ---
         cursor: str | None = None
         uris: set[str] = set()
         for _ in range(10):  # bounded walk guard
-            page = await agent.get_resources(computer="comp-e2e", mcp_server=_KIT_BUNDLE_ID, cursor=cursor)
+            page = await agent.get_resources(computer=computer.name, mcp_server=KIT_BUNDLE_ID, cursor=cursor)
             uris.update(str(r["uri"]) for r in page["resources"])
             cursor = page.get("next_cursor")
             if not cursor:
                 break
         assert any(u.startswith("skill://") for u in uris), "skill:// resources must pass through get_resources"
         assert any(u.startswith("window://") for u in uris), "window:// resources must pass through get_resources"
-    finally:
-        await agent.disconnect()
-        await asyncio.sleep(0.2)
-        # Explicit shutdown reaps the MCP subprocess; comp_client.disconnect()
-        # is skipped (its 30s timeout would drag the suite, SDK does the same).
-        await computer.shutdown()
+
+
+@pytest.mark.usefixtures("kit_env")
+@_skip_guard
+async def test_staged_scripts_are_real_and_runnable(signaling_endpoint: str, tmp_path: Path) -> None:
+    """The staged write-tfonto package is real on disk and its script runs.
+
+    Acceptance for the Agent execution contract (skill.md §9.3/§9.4):
+    ``A2CSkillRef.path`` is the required absolute staged package dir — the
+    value an Agent SDK renders into ``${TFROBOT_SKILL_DIR}`` — and
+    ``path/scripts/validate_tfonto.py`` is byte-identical to the shipped
+    script and executes successfully against the staged example, so an Agent
+    can drive it with
+    ``python ${TFROBOT_SKILL_DIR}/scripts/validate_tfonto.py <tfo>``.
+    """
+    async with boot_kit_trio(
+        signaling_endpoint, agent_id="e2e-agent", office_id="e2e-script-office", skill_home=tmp_path / "skills"
+    ) as (computer, _comp_client, agent):
+        skills_ret = await agent.get_skills(computer.name)
+        ref = next(s for s in skills_ret["skills"] if s["name"].endswith(":write-tfonto"))
+
+        # -- The registry path is the real, absolute staged package dir --------
+        staged_root = Path(ref["path"])
+        assert staged_root.is_absolute(), "A2CSkillRef.path must be absolute (skill.md §6)"
+        assert staged_root.is_dir(), f"staged dir missing: {staged_root}"
+
+        # -- Full package shape on disk, byte-identical to the shipped files ---
+        for rel in _WRITE_TFONTO_FILES:
+            staged_file = staged_root / rel
+            assert staged_file.is_file(), f"missing staged file: {rel}"
+        for rel in _WRITE_TFONTO_FILES:
+            shipped = files("theseus_kit.skills").joinpath("write-tfonto", rel).read_bytes()
+            assert (staged_root / rel).read_bytes() == shipped, f"staged file differs from shipped: {rel}"
+
+        # -- The staged SKILL.md carries the execution contract ------------------
+        skill_md = (staged_root / "SKILL.md").read_text(encoding="utf-8")
+        assert "${TFROBOT_SKILL_DIR}/scripts/validate_tfonto.py" in skill_md, (
+            "staged SKILL.md must reference the validator via the placeholder"
+        )
+
+        # -- Execute the STAGED validator against the STAGED example -----------
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(staged_root / "scripts/validate_tfonto.py"),
+                str(staged_root / "references/teacher-math.tfo"),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert proc.returncode == 0, f"staged validator failed:\n{proc.stdout}\n{proc.stderr}"
+        assert "校验通过" in proc.stdout, f"unexpected validator output: {proc.stdout!r}"
+
+        # -- get_skill integrity: reported sha256 matches the staged disk file -
+        ret = await agent.get_skill(computer.name, ref["name"], rel_path="scripts/validate_tfonto.py")
+        assert ret["rel_path"] == "scripts/validate_tfonto.py"
+        disk_digest = hashlib.sha256((staged_root / "scripts/validate_tfonto.py").read_bytes()).hexdigest()
+        assert ret["sha256"] == disk_digest, "get_skill sha256 must match the staged disk file"

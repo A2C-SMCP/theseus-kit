@@ -21,7 +21,6 @@ import socket
 import time
 from collections.abc import Iterator
 from multiprocessing.synchronize import Event
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -132,6 +131,3 @@ def kit_env(signaling_endpoint: str, fake_robot: FakeRobotServer, monkeypatch: p
     monkeypatch.setenv("THESEUS_CREDENTIAL__KIND", "user_pat")
     monkeypatch.setenv("THESEUS_CREDENTIAL__PAT", "tfp_e2e_test_pat")
     monkeypatch.setenv("THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID", "e2eorg:10001")
-
-
-KIT_RUNNER = Path(__file__).with_name("_kit_stdio_runner.py")
