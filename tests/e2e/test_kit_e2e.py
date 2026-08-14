@@ -71,6 +71,8 @@ _WRITE_TFONTO_FILES = (
     "references/capability-layer.md",
     "references/teacher-math-example.md",
     "references/teacher-math.tfo",
+    "references/engineering-memory-example.md",
+    "references/engineering-memory.tfo",
     "scripts/validate_tfonto.py",
 )
 
@@ -226,19 +228,20 @@ async def test_staged_scripts_are_real_and_runnable(signaling_endpoint: str, tmp
             "staged SKILL.md must reference the validator via the placeholder"
         )
 
-        # -- Execute the STAGED validator against the STAGED example -----------
-        proc = subprocess.run(
-            [
-                sys.executable,
-                str(staged_root / "scripts/validate_tfonto.py"),
-                str(staged_root / "references/teacher-math.tfo"),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        assert proc.returncode == 0, f"staged validator failed:\n{proc.stdout}\n{proc.stderr}"
-        assert "校验通过" in proc.stdout, f"unexpected validator output: {proc.stdout!r}"
+        # -- Execute the STAGED validator against the STAGED examples ----------
+        for example_rel in ("references/teacher-math.tfo", "references/engineering-memory.tfo"):
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(staged_root / "scripts/validate_tfonto.py"),
+                    str(staged_root / example_rel),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            assert proc.returncode == 0, f"staged validator failed on {example_rel}:\n{proc.stdout}\n{proc.stderr}"
+            assert "校验通过" in proc.stdout, f"unexpected validator output: {proc.stdout!r}"
 
         # -- get_skill integrity: reported sha256 matches the staged disk file -
         ret = await agent.get_skill(computer.name, ref["name"], rel_path="scripts/validate_tfonto.py")

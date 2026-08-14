@@ -41,6 +41,7 @@ description: 将结构化自然语言知识图谱（概念/数据字段/关系�
 - [ ] 所有 `domain`/`range`/`name_properties`/`primary_property`/`depends_on`/`function_id` 引用都能解析到已定义的名字
 - [ ] 每个 `data_range` 与 `signature` 是 mapping；`trigger_words` 只出现在 link_types
 - [ ] 若写 functions/actions：`kind` 合法、`body` 必填、Action 的 `edit_set`/`backing` 至少其一；结构与 `references/teacher-math-example.md`、`references/capability-layer.md` 范例一致
+- [ ] edit_set 操作形状（TR-013 §4.5，易错点）：`update_entity` 的载荷是 `prop_delta`（动词 `set/append/remove`），`props` 只属于 `create_entity`/`add_link`；值位一律 `{node: param, param: …}` 或 `{node: literal, value: …}`（见范例二 `references/engineering-memory.tfo`）
 
 ## 校验（收稿门槛）
 
@@ -52,7 +53,9 @@ python ${TFROBOT_SKILL_DIR}/scripts/validate_tfonto.py <文件>.tfo
 
 跑出 `✅ 校验通过` 才算收稿，失败逐条修正后重跑。A2C 环境由 SDK 把 `${TFROBOT_SKILL_DIR}` 展开为技能包绝对路径；若占位符未展开（非 A2C 客户端），先把 `scripts/validate_tfonto.py` 资源内容保存为本地文件再运行。
 
-**权威校验门仍是平台导入**：校验器通过 ≠ 平台一定通过（深层 AST、JSON Schema 全文、DSL 编译由平台校验），但校验器失败平台必然拒绝。交付时向需求方说明这一边界。
+校验器已镜像平台导入器的能力层 AST 形状（与 `kinetic.py`/`expr.py` 同语义）：EditOp 六种操作的字段白名单与必填、ValueExpr 操作数（值位禁裸标量）、`prop_delta` 动词载荷、提交条件表达式树、顶层信封 fail-loud——`update_entity` 混写 `props`、值位写裸标量这类错误本地直接红叉。
+
+**权威校验门仍是平台导入**：校验器通过 ≠ 平台一定通过（`apply_to` 内 ObjectSetExpr 深层形状、JSON Schema 全文、DSL 编译由平台校验），但校验器失败平台必然拒绝。交付时向需求方说明这一边界。
 
 ## 交付
 
@@ -64,6 +67,8 @@ python ${TFROBOT_SKILL_DIR}/scripts/validate_tfonto.py <文件>.tfo
 
 - `references/tfonto-format.md` — .tfo 格式说明（画像阶段相关字段 + 常见错误对照表）
 - `references/capability-layer.md` — 能力层：FunctionDef × ActionDef 概念、场景组合表、能力草图范例
-- `references/teacher-math-example.md` — 范例：知识结构清单 → .tfo（初中数学教学机器人）
-- `references/teacher-math.tfo` — 完整范例文件（结构 + 能力草图），已通过校验器与平台导入器验证
+- `references/teacher-math-example.md` — 范例一：知识结构清单 → .tfo（初中数学教学机器人）
+- `references/teacher-math.tfo` — 范例一完整文件（结构 + 能力草图），已通过校验器与平台导入器验证
+- `references/engineering-memory-example.md` — 范例二：软件工程项目记忆机器人（状态流转 + Action 多属性变更）
+- `references/engineering-memory.tfo` — 范例二完整文件（结构 + 能力草图），已通过校验器与平台导入器
 - `scripts/validate_tfonto.py` — 独立校验器（仅依赖 PyYAML），收稿门槛

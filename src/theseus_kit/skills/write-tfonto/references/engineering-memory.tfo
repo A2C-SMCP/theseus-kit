@@ -1,0 +1,158 @@
+# TFOnto native format v7
+# 范例：软件工程项目记忆机器人知识结构（write-tfonto 技能资源）
+schema_version: 7
+ontology:
+  namespace: eng-memory
+
+object_types:
+  - {name: Requirement, pos: [noun], name_properties: [req_title]}
+  - {name: Decision, pos: [noun], name_properties: [decision_title]}
+  - {name: Implementation, pos: [noun], name_properties: [impl_title]}
+  - {name: Incident, pos: [noun], name_properties: [incident_title]}
+  - {name: Person, pos: [noun], name_properties: [person_name]}
+  - {name: Source, pos: [noun], name_properties: [source_title]}
+
+properties:
+  - name: req_title
+    domain: [Requirement]
+    data_range: {type: string}
+  - name: req_status
+    domain: [Requirement]
+    data_range: {type: string, enum: [proposed, approved, cancelled]}
+    characteristics: {is_functional: true}
+  - name: decision_title
+    domain: [Decision]
+    data_range: {type: string}
+  - name: decision_status
+    domain: [Decision]
+    data_range: {type: string, enum: [active, superseded]}
+    characteristics: {is_functional: true}
+  - name: impl_title
+    domain: [Implementation]
+    data_range: {type: string}
+  - name: impl_status
+    domain: [Implementation]
+    data_range: {type: string, enum: [in_dev, merged, released]}
+    characteristics: {is_functional: true}
+  - name: incident_title
+    domain: [Incident]
+    data_range: {type: string}
+  - name: incident_status
+    domain: [Incident]
+    data_range: {type: string, enum: [open, mitigated, resolved]}
+    characteristics: {is_functional: true}
+  - name: severity
+    domain: [Incident]
+    data_range: {type: string, enum: [low, medium, high, critical]}
+  - name: happened_at
+    domain: [Incident]
+    data_range: {type: string, format: date-time}
+  - name: person_name
+    domain: [Person]
+    data_range: {type: string}
+  - name: source_title
+    domain: [Source]
+    data_range: {type: string}
+  - name: source_kind
+    domain: [Source]
+    data_range: {type: string, enum: [issue, pr, doc, meeting, chat]}
+
+link_types:
+  - name: drives
+    domain: [Requirement]
+    range: [Decision]
+    trigger_words: [驱动, 触发决策]
+  - name: implements
+    domain: [Implementation]
+    range: [Requirement]
+    trigger_words: [落地, 实现]
+  - name: found_in
+    domain: [Incident]
+    range: [Implementation]
+    trigger_words: [源于, 发现于]
+  - name: supersedes
+    domain: [Decision]
+    range: [Decision]
+    trigger_words: [取代, 推翻]
+  - name: evidences
+    domain: [Source]
+    range: [Requirement, Decision, Implementation, Incident]
+    trigger_words: [记录, 佐证]
+  - name: author_of
+    domain: [Person]
+    range: [Source]
+    trigger_words: [提出, 编写]
+
+# —— 能力草图：Action 一次触发多属性/多关系变更（对比逐个 Property 修改）——
+
+functions:
+  - name: trace_requirement
+    # 只读计算（全链追溯）：query 单用，不动数据
+    kind: query
+    signature:
+      inputs:
+        type: object
+        properties:
+          req_id: {type: string}
+      output: {type: array, items: {type: object}}
+    body: {ref: script, language: tfdsl, source: ""}
+    depends_on: [Requirement, Decision, Implementation, Incident, drives, implements, found_in]
+
+actions:
+  - name: record_incident
+    # 核心价值：一个动作改齐 4 个属性 + 2 条边（过去逐个 Property 修改，易漏易错）
+    parameters:
+      - {name: incident_id, type: {type: string}}
+      - {name: title, type: {type: string}}
+      - {name: severity, type: {type: string, enum: [low, medium, high, critical]}}
+      - {name: happened_at, type: {type: string, format: date-time}}
+      - {name: impl_id, type: {type: string}}
+      - {name: source_id, type: {type: string}}
+    edit_set:
+      ops:
+        - op: update_entity
+          target: {node: param, param: incident_id}
+          prop_delta:
+            - verb: set
+              props:
+                incident_title: {node: param, param: title}
+                severity: {node: param, param: severity}
+                happened_at: {node: param, param: happened_at}
+                incident_status: {node: literal, value: open}
+        - op: add_link
+          link_type: found_in
+          source: {node: param, param: incident_id}
+          target: {node: param, param: impl_id}
+        - op: add_link
+          link_type: evidences
+          source: {node: param, param: source_id}
+          target: {node: param, param: incident_id}
+    submission_criteria:
+      - condition: {node: compare, op: is_not_null, left: {node: param, param: title}}
+        message: 故障标题不能为空
+      - condition: {node: compare, op: is_not_null, left: {node: param, param: impl_id}}
+        message: 必须关联故障所在的实现
+    side_effects:
+      - {ref: event, event: incident_recorded}
+  - name: supersede_decision
+    # 状态流转：旧决策状态改「被取代」+ 建取代边，一次改齐
+    parameters:
+      - {name: old_decision_id, type: {type: string}}
+      - {name: new_decision_id, type: {type: string}}
+    edit_set:
+      ops:
+        - op: update_entity
+          target: {node: param, param: old_decision_id}
+          prop_delta:
+            - verb: set
+              props:
+                decision_status: {node: literal, value: superseded}
+        - op: add_link
+          link_type: supersedes
+          source: {node: param, param: new_decision_id}
+          target: {node: param, param: old_decision_id}
+    submission_criteria:
+      - condition: {node: compare, op: is_not_null, left: {node: param, param: new_decision_id}}
+        message: 新决策 ID 不能为空
+    side_effects:
+      - {ref: event, event: decision_superseded}

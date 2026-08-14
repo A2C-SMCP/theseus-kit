@@ -112,6 +112,8 @@ async def test_sub_resources_exist() -> None:
         f"{_SKILL_NS}/write-tfonto/references/capability-layer.md",
         f"{_SKILL_NS}/write-tfonto/references/teacher-math-example.md",
         f"{_SKILL_NS}/write-tfonto/references/teacher-math.tfo",
+        f"{_SKILL_NS}/write-tfonto/references/engineering-memory-example.md",
+        f"{_SKILL_NS}/write-tfonto/references/engineering-memory.tfo",
         f"{_SKILL_NS}/write-tfonto/scripts/validate_tfonto.py",
     ]
     for uri in expected_subs:
@@ -119,12 +121,12 @@ async def test_sub_resources_exist() -> None:
 
 
 async def test_resource_count() -> None:
-    """Total skill resources is 7 main + 7 SKILL.md subs + 13 sub + 3 legacy = 30 (plus 2 window = 32)."""
+    """Total skill resources is 7 main + 7 SKILL.md subs + 15 sub + 3 legacy = 32 (plus 2 window = 34)."""
     mcp = create_mcp_server(_settings())
     resources = await mcp.list_resources()
     skill_uris = [str(r.uri) for r in resources if str(r.uri).startswith(_SKILL_NS)]
-    # 7 main + 7 SKILL.md subs + 13 sub + 3 legacy = 30
-    assert len(skill_uris) == 30, f"Expected 30 skill resources, got {len(skill_uris)}: {skill_uris}"
+    # 7 main + 7 SKILL.md subs + 15 sub + 3 legacy = 32
+    assert len(skill_uris) == 32, f"Expected 32 skill resources, got {len(skill_uris)}: {skill_uris}"
 
 
 # -- Resource annotations ---------------------------------------------------
@@ -268,6 +270,9 @@ async def test_read_persona_interview() -> None:
     assert "知识结构" in content
     assert "三张清单" in content  # structured-NL knowledge structure
     assert "能力草图" in content  # Function/Action candidate extraction
+    assert "状态流转" in content  # lifecycle probing → ActionDef candidates
+    assert "连带变更" in content  # multi-property write probing (Action 核心价值)
+    assert "故障经验" in content  # past-failure probing → recall & regression
     assert "ActionDef" in content
     assert "write-tfonto" in content  # conversion handoff
     assert "persona-example" in content  # sub-resource reference
@@ -305,6 +310,7 @@ async def test_read_persona_example() -> None:
     assert "数据字段清单" in content
     assert "关系清单" in content
     assert "能力草图" in content
+    assert "状态流转" in content  # new collection axis demonstrated
     assert "ActionDef" in content
 
 
@@ -320,6 +326,21 @@ async def test_read_teacher_math_example() -> None:
     assert "trigger_words" in content
     assert "primary_property" in content
     assert "capability-layer" in content  # pointer to the functions/actions example
+
+
+async def test_read_engineering_memory_example() -> None:
+    """engineering-memory example covers the state-transition and multi-property Action showcase."""
+    mcp = create_mcp_server(_settings())
+    result = await mcp.read_resource(f"{_SKILL_NS}/write-tfonto/references/engineering-memory-example.md")
+    content = _read_text(result)
+
+    assert "engineering-memory.tfo" in content  # pointer to the complete file
+    assert "状态流转" in content  # persona-interview new collection axis
+    assert "trace_requirement" in content
+    assert "record_incident" in content
+    assert "supersede_decision" in content
+    assert "4 个属性 + 2 条边" in content  # Action 多属性变更核心价值
+    assert "逐个 Property 修改" in content
 
 
 async def test_read_capability_layer() -> None:
@@ -351,6 +372,7 @@ async def test_sub_resource_mime_types() -> None:
     expected = {
         f"{_SKILL_NS}/write-tfonto/references/tfonto-format.md": "text/markdown",
         f"{_SKILL_NS}/write-tfonto/references/teacher-math.tfo": "application/yaml",
+        f"{_SKILL_NS}/write-tfonto/references/engineering-memory.tfo": "application/yaml",
         f"{_SKILL_NS}/write-tfonto/scripts/validate_tfonto.py": "text/x-python",
     }
     by_uri = {str(r.uri): r.mimeType for r in resources}
@@ -358,19 +380,26 @@ async def test_sub_resource_mime_types() -> None:
         assert by_uri.get(uri) == mime, f"{uri}: expected {mime}, got {by_uri.get(uri)}"
 
 
-def test_shipped_validator_accepts_shipped_example(tmp_path: Path) -> None:
-    """The shipped validator script (executed) accepts the shipped example .tfo."""
+@pytest.mark.parametrize(
+    ("example_rel", "expect_marker"),
+    [
+        ("references/teacher-math.tfo", "math-teacher"),
+        ("references/engineering-memory.tfo", "eng-memory"),
+    ],
+)
+def test_shipped_validator_accepts_shipped_examples(tmp_path: Path, example_rel: str, expect_marker: str) -> None:
+    """The shipped validator script (executed) accepts every shipped example .tfo."""
     import subprocess
     import sys
 
     from theseus_kit.skills import build_skill_resource
 
     script = build_skill_resource("write-tfonto", "scripts/validate_tfonto.py")
-    example = build_skill_resource("write-tfonto", "references/teacher-math.tfo")
+    example = build_skill_resource("write-tfonto", example_rel)
 
     script_path = tmp_path / "validate_tfonto.py"
     script_path.write_text(script, encoding="utf-8")
-    example_path = tmp_path / "teacher-math.tfo"
+    example_path = tmp_path / example_rel.rsplit("/", 1)[1]
     example_path.write_text(example, encoding="utf-8")
 
     proc = subprocess.run(
@@ -379,8 +408,9 @@ def test_shipped_validator_accepts_shipped_example(tmp_path: Path) -> None:
         text=True,
         timeout=60,
     )
-    assert proc.returncode == 0, f"validator failed:\n{proc.stdout}\n{proc.stderr}"
+    assert proc.returncode == 0, f"validator failed for {example_rel}:\n{proc.stdout}\n{proc.stderr}"
     assert "校验通过" in proc.stdout
+    assert expect_marker in example
 
 
 def test_shipped_validator_rejects_bad_namespace(tmp_path: Path) -> None:
@@ -409,6 +439,156 @@ ontology:
     )
     assert proc.returncode == 1
     assert "namespace" in proc.stdout
+
+
+# -- 能力层 AST 形状负向用例（镜像 kinetic.py/expr.py，与平台导入器同语义）--
+
+
+def _run_validator(tmp_path: Path, name: str, tfo_text: str) -> Any:
+    """Write *tfo_text* to tmp and run the shipped validator on it; return the process."""
+    import subprocess
+    import sys
+
+    from theseus_kit.skills import build_skill_resource
+
+    script = build_skill_resource("write-tfonto", "scripts/validate_tfonto.py")
+    script_path = tmp_path / "validate_tfonto.py"
+    script_path.write_text(script, encoding="utf-8")
+    tfo_path = tmp_path / name
+    tfo_path.write_text(tfo_text, encoding="utf-8")
+    return subprocess.run(
+        [sys.executable, str(script_path), str(tfo_path)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
+def _minimal_action_tfo(*, ops_block: str, extra_blocks: str = "") -> str:
+    """Minimal valid envelope with one action whose edit_set.ops is supplied."""
+    return f"""schema_version: 7
+ontology: {{namespace: t}}
+object_types:
+  - {{name: T, pos: [noun]}}
+properties:
+  - {{name: p, domain: [T], data_range: {{type: string}}}}
+actions:
+  - name: a
+    parameters:
+      - {{name: x, type: {{type: string}}}}
+{extra_blocks}    edit_set:
+      ops:
+{ops_block}
+"""
+
+
+def test_shipped_validator_rejects_props_on_update_entity(tmp_path: Path) -> None:
+    """update_entity's payload is prop_delta — props on it is rejected (the classic mix-up)."""
+    proc = _run_validator(
+        tmp_path,
+        "props_on_update.tfo",
+        _minimal_action_tfo(
+            ops_block="""        - op: update_entity
+          target: {node: param, param: x}
+          props: {p: {node: literal, value: hi}}
+""",
+        ),
+    )
+    assert proc.returncode == 1
+    assert "prop_delta" in proc.stdout  # hint points at the right fix
+
+
+def test_shipped_validator_rejects_bare_scalar_operand(tmp_path: Path) -> None:
+    """Value positions must be operand mappings; bare scalars are rejected."""
+    proc = _run_validator(
+        tmp_path,
+        "bare_scalar.tfo",
+        _minimal_action_tfo(
+            ops_block="""        - op: update_entity
+          target: {node: param, param: x}
+          prop_delta:
+            - verb: set
+              props: {p: hi}
+""",
+        ),
+    )
+    assert proc.returncode == 1
+    assert "literal" in proc.stdout  # error teaches the {node: literal, value} form
+
+
+def test_shipped_validator_rejects_prop_verb_conflict(tmp_path: Path) -> None:
+    """The same property in two verbs (set+remove) is a semantic ambiguity."""
+    proc = _run_validator(
+        tmp_path,
+        "verb_conflict.tfo",
+        _minimal_action_tfo(
+            ops_block="""        - op: update_entity
+          target: {node: param, param: x}
+          prop_delta:
+            - verb: set
+              props: {p: {node: literal, value: hi}}
+            - verb: remove
+              props: {p: {node: literal, value: null}}
+""",
+        ),
+    )
+    assert proc.returncode == 1
+    assert "歧义" in proc.stdout
+
+
+def test_shipped_validator_rejects_comparison_arity(tmp_path: Path) -> None:
+    """Binary comparison operators require a right operand (mirrors kinetic arity rule)."""
+    proc = _run_validator(
+        tmp_path,
+        "arity.tfo",
+        _minimal_action_tfo(
+            ops_block="""        - op: update_entity
+          target: {node: param, param: x}
+          prop_delta:
+            - verb: set
+              props: {p: {node: literal, value: hi}}
+""",
+            extra_blocks="""    submission_criteria:
+      - condition: {node: compare, op: eq, left: {node: param, param: x}}
+        message: 需要右操作数
+""",
+        ),
+    )
+    assert proc.returncode == 1
+    assert "right" in proc.stdout
+
+
+def test_shipped_validator_rejects_unknown_top_level_key(tmp_path: Path) -> None:
+    """Unknown envelope keys fail-loud (typo'd `object_type:` silently evaporates otherwise)."""
+    proc = _run_validator(
+        tmp_path,
+        "bad_envelope.tfo",
+        """schema_version: 7
+ontology: {namespace: t}
+object_type:
+  - {name: T, pos: [noun]}
+""",
+    )
+    assert proc.returncode == 1
+    assert "object_type" in proc.stdout
+
+
+def test_shipped_validator_warns_undeclared_param_reference(tmp_path: Path) -> None:
+    """Undeclared param operands are import-accepted but binding-fatal — warn, don't fail."""
+    proc = _run_validator(
+        tmp_path,
+        "undeclared_param.tfo",
+        _minimal_action_tfo(
+            ops_block="""        - op: update_entity
+          target: {node: param, param: y}
+          prop_delta:
+            - verb: set
+              props: {p: {node: literal, value: hi}}
+""",
+        ),
+    )
+    assert proc.returncode == 0, f"undeclared param must stay a warning:\n{proc.stdout}"
+    assert "参数引用 'y'" in proc.stdout
 
 
 async def test_read_sub_resource() -> None:
@@ -491,17 +671,44 @@ async def test_each_main_skill_within_8kib() -> None:
         assert size_bytes <= 8192, f"{skill_name}: {size_bytes} bytes exceeds 8 KiB"
 
 
-async def test_each_reference_within_4kib() -> None:
-    """Each references/* sub-resource is <= 4 KiB (context-read documents)."""
+async def test_each_reference_md_within_4kib() -> None:
+    """Each references/*.md sub-resource is <= 4 KiB (context-read prose documents)."""
     mcp = create_mcp_server(_settings())
     resources = await mcp.list_resources()
-    sub_uris = [str(r.uri) for r in resources if str(r.uri).startswith(_SKILL_NS) and "/references/" in str(r.uri)]
+    sub_uris = [
+        str(r.uri)
+        for r in resources
+        if str(r.uri).startswith(_SKILL_NS) and "/references/" in str(r.uri) and str(r.uri).endswith(".md")
+    ]
 
     for uri in sub_uris:
         result = await mcp.read_resource(uri)
         content = _read_text(result)
         size_bytes = len(content.encode("utf-8"))
         assert size_bytes <= 4096, f"{uri}: {size_bytes} bytes exceeds 4 KiB"
+
+
+async def test_each_reference_tfo_within_8kib() -> None:
+    """Each references/*.tfo example is <= 8 KiB (knowledge-graph data artifacts).
+
+    .tfo 范例是平台导入的数据工件（YAML 本体），不是散文引用——Def 结构与
+    能力草图的完整性优先于压到 4 KiB；预算档位与主 SKILL.md 对齐（scripts/
+    则单独放宽到 64 KiB）。4 KiB 档仅约束 .md 散文引用。
+    """
+    mcp = create_mcp_server(_settings())
+    resources = await mcp.list_resources()
+    sub_uris = [
+        str(r.uri)
+        for r in resources
+        if str(r.uri).startswith(_SKILL_NS) and "/references/" in str(r.uri) and str(r.uri).endswith(".tfo")
+    ]
+
+    assert sub_uris, "expected at least one references/*.tfo example"
+    for uri in sub_uris:
+        result = await mcp.read_resource(uri)
+        content = _read_text(result)
+        size_bytes = len(content.encode("utf-8"))
+        assert size_bytes <= 8192, f"{uri}: {size_bytes} bytes exceeds 8 KiB"
 
 
 async def test_each_script_within_64kib() -> None:
