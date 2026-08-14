@@ -11,6 +11,28 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 
+def load_package_skill(package_rel: str, name: str, description: str) -> SkillDef:
+    """Load a :class:`SkillDef` whose content lives in a skill package folder.
+
+    *package_rel* is a folder under ``theseus_kit.skills`` following the
+    marketplace SKILL v1 package shape — ``SKILL.md`` plus optional
+    ``references/`` and ``scripts/`` subfolders.  Every file is read verbatim
+    and becomes a ``rel_path`` content key.  A missing ``SKILL.md`` raises
+    ``ValueError`` (fail-loud packaging guard).
+    """
+    from importlib.resources import as_file, files
+
+    root = files("theseus_kit.skills").joinpath(package_rel)
+    with as_file(root) as root_path:
+        content: dict[str, str] = {}
+        for path in root_path.rglob("*"):
+            if path.is_file():
+                content[path.relative_to(root_path).as_posix()] = path.read_text(encoding="utf-8")
+    if "SKILL.md" not in content:
+        raise ValueError(f"Skill package {package_rel!r} is missing SKILL.md — packaging bug?")
+    return SkillDef(name=name, description=description, content=content)
+
+
 @dataclass(frozen=True, slots=True)
 class SkillDef:
     """Definition of one skill category with its resources.
@@ -79,9 +101,25 @@ _LEGACY_ALIASES: dict[str, str] = {
 
 def _load_all() -> dict[str, SkillDef]:
     """Import and index every skill def from the per-category modules."""
-    from . import _analyze_config, _manage_topology, _publish_config, _save_template, _tune_config
+    from . import (
+        _analyze_config,
+        _manage_topology,
+        _persona_interview,
+        _publish_config,
+        _save_template,
+        _tune_config,
+        _write_tfonto,
+    )
 
-    modules = [_analyze_config, _manage_topology, _publish_config, _save_template, _tune_config]
+    modules = [
+        _analyze_config,
+        _manage_topology,
+        _persona_interview,
+        _publish_config,
+        _save_template,
+        _tune_config,
+        _write_tfonto,
+    ]
     result: dict[str, SkillDef] = {}
     for mod in modules:
         skill: SkillDef = mod.SKILL

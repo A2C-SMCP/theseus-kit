@@ -1,4 +1,6 @@
 from importlib.metadata import version
+from importlib.resources import files
+from pathlib import Path
 
 import pytest
 from mcp.server.fastmcp import FastMCP
@@ -55,3 +57,47 @@ def test_create_mcp_server_with_oauth() -> None:
     assert mcp.settings.auth.required_scopes == ["config:read", "config:write"]
     # token_verifier is stored as a private attr on FastMCP (not on .settings).
     assert isinstance(mcp._token_verifier, _LazyOAuthTokenVerifier)
+
+
+def test_write_tfonto_skill_package_shape() -> None:
+    """The write-tfonto skill is a real package folder (SKILL.md + references/ + scripts/)."""
+    root = files("theseus_kit.skills").joinpath("write-tfonto")
+    assert root.joinpath("SKILL.md").is_file()
+    assert root.joinpath("references/teacher-math.tfo").is_file()
+    assert root.joinpath("scripts/validate_tfonto.py").is_file()
+
+
+def test_wheel_ships_write_tfonto_package(tmp_path: Path) -> None:
+    """The built wheel contains every write-tfonto package file.
+
+    Guards the packaging contract behind the folder-based skill: hatchling
+    must keep shipping the data files (a silent drop would break the skill
+    for installed deployments).
+    """
+    import subprocess
+    import zipfile
+
+    out = tmp_path / "dist"
+    proc = subprocess.run(
+        ["uv", "build", "--wheel", "--out-dir", str(out)],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert proc.returncode == 0, f"uv build failed:\n{proc.stdout}\n{proc.stderr}"
+
+    wheels = list(out.glob("*.whl"))
+    assert len(wheels) == 1, f"expected exactly one wheel, got {wheels}"
+    with zipfile.ZipFile(wheels[0]) as archive:
+        names = set(archive.namelist())
+
+    prefix = "theseus_kit/skills/write-tfonto/"
+    expected = {
+        f"{prefix}SKILL.md",
+        f"{prefix}references/tfonto-format.md",
+        f"{prefix}references/capability-layer.md",
+        f"{prefix}references/teacher-math-example.md",
+        f"{prefix}references/teacher-math.tfo",
+        f"{prefix}scripts/validate_tfonto.py",
+    }
+    assert expected <= names, f"missing from wheel: {expected - names}"

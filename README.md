@@ -97,16 +97,21 @@ publish_config            ← 发布：显式确认 + root_hash 校验
 
 ## Skill 资源
 
-theseus-kit 通过 `skill://` 资源暴露 **3 个中文技能指南**，为 LLM 提供结构化的操作流程：
+theseus-kit 通过 `skill://` 资源暴露 **7 个中文技能指南**，为 LLM 提供结构化的操作流程：
 
 | Skill | 资源 URI | 说明 |
 |-------|----------|------|
-| 查看配置 | `skill://com.a2c-smcp.theseus-kit/inspect-robot-config` | 标准探索流程：概览 → Schema → 列表 → 详情 → 模板，含脱敏和分页处理指南 |
-| 编辑草稿 | `skill://com.a2c-smcp.theseus-kit/edit-robot-draft` | 读取-检查-写入循环：Schema 优先、乐观并发控制、校验错误处理、模板保存 |
-| 发布配置 | `skill://com.a2c-smcp.theseus-kit/publish-robot-config` | 预检 → 审批边界 → 发布 → 验证，含显式 `acknowledge_publish` 机制和失败处理矩阵 |
+| 分析配置 | `skill://com.a2c-smcp.theseus-kit/analyze-config` | 确认目标 → 全局概览 → LLMTEXT 技术选型 → 优化大纲 |
+| 管理拓扑 | `skill://com.a2c-smcp.theseus-kit/manage-topology` | 创建节点 → 删除节点 → 修改引用关系，结合 LLMTEXT 进行技术选型 |
+| 调优配置 | `skill://com.a2c-smcp.theseus-kit/tune-config` | 读取现状 → 理解字段约束 → 合理化修改 → 校验 → 冲突处理 |
+| 保存模板 | `skill://com.a2c-smcp.theseus-kit/save-template` | 识别可复用节点 → 命名 → 保存 → 验证 |
+| 发布配置 | `skill://com.a2c-smcp.theseus-kit/publish-config` | 预检 → 审批 → 发布 → 验证，全局不可逆操作 |
+| 用户画像采访 | `skill://com.a2c-smcp.theseus-kit/persona-interview` | 采访需求方获取画像：职业领域 / 专业技能 / 日常工作 / 知识结构三张清单 / 能力草图候选 |
+| 写 TFOnto | `skill://com.a2c-smcp.theseus-kit/write-tfonto` | 知识结构 + 能力草图 → 平台可导入的 `.tfo`（概念/属性/关系 → Def，能力 → Function/Action），附带独立校验器 `scripts/validate_tfonto.py` 与完整范例 |
 
 每个 Skill 定义了允许使用的工具、所需 Scope、标准操作流程和关键约束，
-确保 LLM 按「最佳实践」而非自由发挥来操作配置。
+确保 LLM 按「最佳实践」而非自由发挥来操作配置。旧版别名
+（`inspect-robot-config` / `edit-robot-draft` / `publish-robot-config`）以 deprecated 标记保留。
 
 ### 实时状态窗口：`window://`
 

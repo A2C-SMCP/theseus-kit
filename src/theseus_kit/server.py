@@ -82,11 +82,21 @@ def _make_skill_reader(skill_name: str, rel_path: str) -> Callable[[], str]:
 
 
 def _register_skill_resources(mcp: FastMCP) -> None:
-    """Register all skill:// resources (main + sub) on *mcp*."""
+    """Register all skill:// resources (root + sub) on *mcp*.
+
+    A2C-SMCP skill.md §3 mode C ("resources") registrable shape, per the SDK's
+    ``fastmcp_skill_stdio_server`` fixture: the skill ROOT resource declares
+    the staging mode in ``_meta``; the Computer materializes the package by
+    reading every sub-resource under the root's URI prefix.  ``SKILL.md``
+    itself is therefore exposed BOTH at the root (for plain MCP clients, the
+    SDK never reads root content in this mode) and as the ``SKILL.md``
+    sub-resource (which is what the SDK stages as the package entry).
+    """
+    from . import __version__
     from .skills import SkillRegistry
 
     for skill in SkillRegistry.all():
-        # -- Main entry (SKILL.md) --
+        # -- Root (declaration node, also serves SKILL.md for plain clients) --
         main_rel = "SKILL.md"
 
         _reader = _make_skill_reader(skill.name, main_rel)
@@ -97,10 +107,11 @@ def _register_skill_resources(mcp: FastMCP) -> None:
             description=skill.description,
             mime_type="text/markdown",
             annotations=Annotations(audience=["assistant"], priority=0.7),
-            meta={"source": "resources"},
+            meta={"source": "resources", "version": __version__},
         )(_reader)
 
-        # -- Sub-resources (references/*.md) --
+        # -- Sub-resources: SKILL.md + references/* + scripts/*, ... --
+        _register_skill_sub_resource(mcp, skill.name, "SKILL.md")
         for rel_path in skill.sub_resources:
             _register_skill_sub_resource(mcp, skill.name, rel_path)
 
@@ -124,7 +135,6 @@ def _register_skill_resources(mcp: FastMCP) -> None:
             mime_type="text/markdown",
             annotations=Annotations(audience=["assistant"], priority=0.6),
             meta={
-                "source": "resources",
                 "deprecated": True,
                 "migrated_to": new_name,
             },
@@ -132,14 +142,25 @@ def _register_skill_resources(mcp: FastMCP) -> None:
 
 
 def _register_skill_sub_resource(mcp: FastMCP, skill_name: str, rel_path: str) -> None:
-    """Register a single sub-resource for a skill."""
+    """Register a single sub-resource for a skill.
+
+    MIME type comes from a deterministic built-in extension mapping
+    (A2C-SMCP skill.md §6.4) — never from the host OS registry.
+
+    Sub-resources deliberately carry NO ``source`` meta: skill.md §3 declares
+    the staging mode on the SKILL root only; sub-resources are discovered by
+    URI prefix (``skill://<root>/**``) when the Computer stages the root.
+    """
+    from . import __version__
+    from .skills import mime_for_rel_path
+
     mcp.resource(
         f"{_SKILL_NS}/{skill_name}/{rel_path}",
         name=f"Skill Ref: {skill_name}/{rel_path}",
         description=f"Reference for {skill_name}: {rel_path}",
-        mime_type="text/markdown",
+        mime_type=mime_for_rel_path(rel_path),
         annotations=Annotations(audience=["assistant"], priority=0.6),
-        meta={"source": "resources"},
+        meta={"version": __version__},
     )(_make_skill_reader(skill_name, rel_path))
 
 

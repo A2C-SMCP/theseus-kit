@@ -7,6 +7,7 @@ legacy aliases.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -21,9 +22,11 @@ _SKILL_NS = "skill://com.a2c-smcp.theseus-kit"
 _NEW_SKILLS = (
     "analyze-config",
     "manage-topology",
-    "tune-config",
-    "save-template",
+    "persona-interview",
     "publish-config",
+    "save-template",
+    "tune-config",
+    "write-tfonto",
 )
 
 # Legacy aliases (deprecated)
@@ -92,34 +95,43 @@ async def test_sub_resources_exist() -> None:
     resources = await mcp.list_resources()
     uris = {str(r.uri) for r in resources}
 
-    # Check that analyze-config has its sub-resources
+    # Check that analyze-config has its sub-resources.  Each skill also exposes
+    # its own SKILL.md as a sub-resource — the mode C registrable shape the SDK
+    # Computer stages from (the root is only the declaration node).
     expected_subs = [
+        f"{_SKILL_NS}/analyze-config/SKILL.md",
         f"{_SKILL_NS}/analyze-config/references/llmtext-strategy.md",
         f"{_SKILL_NS}/analyze-config/references/needs-extraction.md",
         f"{_SKILL_NS}/manage-topology/references/factory-selection.md",
+        f"{_SKILL_NS}/persona-interview/references/persona-example.md",
         f"{_SKILL_NS}/tune-config/references/field-design.md",
         f"{_SKILL_NS}/tune-config/references/conflict-resolution.md",
         f"{_SKILL_NS}/tune-config/references/validation-strategy.md",
         f"{_SKILL_NS}/publish-config/references/preflight-deep-dive.md",
+        f"{_SKILL_NS}/write-tfonto/references/tfonto-format.md",
+        f"{_SKILL_NS}/write-tfonto/references/capability-layer.md",
+        f"{_SKILL_NS}/write-tfonto/references/teacher-math-example.md",
+        f"{_SKILL_NS}/write-tfonto/references/teacher-math.tfo",
+        f"{_SKILL_NS}/write-tfonto/scripts/validate_tfonto.py",
     ]
     for uri in expected_subs:
         assert uri in uris, f"Missing sub-resource: {uri}"
 
 
 async def test_resource_count() -> None:
-    """Total skill resources is 5 main + 7 sub + 3 legacy = 15 (plus 2 window resources = 17)."""
+    """Total skill resources is 7 main + 7 SKILL.md subs + 13 sub + 3 legacy = 30 (plus 2 window = 32)."""
     mcp = create_mcp_server(_settings())
     resources = await mcp.list_resources()
     skill_uris = [str(r.uri) for r in resources if str(r.uri).startswith(_SKILL_NS)]
-    # 5 main + 7 sub + 3 legacy = 15
-    assert len(skill_uris) == 15, f"Expected 15 skill resources, got {len(skill_uris)}: {skill_uris}"
+    # 7 main + 7 SKILL.md subs + 13 sub + 3 legacy = 30
+    assert len(skill_uris) == 30, f"Expected 30 skill resources, got {len(skill_uris)}: {skill_uris}"
 
 
 # -- Resource annotations ---------------------------------------------------
 
 
 async def test_main_skill_annotations() -> None:
-    """Main skill resources have audience=assistant, priority=0.7, markdown."""
+    """Main skill resources have audience=assistant, priority=0.7, markdown, versioned meta."""
     mcp = create_mcp_server(_settings())
     resources = await mcp.list_resources()
 
@@ -132,6 +144,32 @@ async def test_main_skill_annotations() -> None:
         assert r.annotations.priority == 0.7
         assert r.mimeType == "text/markdown"
         assert r.description, f"{r.uri}: description is empty"
+        # A2C-SMCP skill.md §3: mode C declaration + version for update detection.
+        assert r.meta is not None
+        assert r.meta.get("source") == "resources"
+        assert r.meta.get("version"), f"{r.uri}: missing version meta"
+
+
+async def test_source_meta_only_on_skill_roots() -> None:
+    """skill.md §3: staging mode is declared on SKILL roots only.
+
+    Sub-resources are discovered by URI prefix (``skill://<root>/**``) and
+    legacy aliases are URI-level compat shims — neither may carry ``source``,
+    or the SDK Computer would attempt to stage each one as an independent
+    skill root (noise, duplicate registrations, ERROR logs).
+    """
+    mcp = create_mcp_server(_settings())
+    resources = await mcp.list_resources()
+
+    for r in resources:
+        uri = str(r.uri)
+        if not uri.startswith(_SKILL_NS):
+            continue
+        leaf = uri.removeprefix(_SKILL_NS).strip("/")
+        if leaf in _NEW_SKILLS:
+            assert r.meta is not None and r.meta.get("source") == "resources", f"{uri}: root must declare source"
+        else:
+            assert r.meta is None or "source" not in r.meta, f"{uri}: sub/legacy resource must not declare source"
 
 
 async def test_legacy_resource_annotations() -> None:
@@ -218,6 +256,161 @@ async def test_read_publish_config() -> None:
     assert "preflight-deep-dive" in content
 
 
+async def test_read_persona_interview() -> None:
+    """persona-interview SKILL.md contains the interview flow, capability sketch, and write-tfonto handoff."""
+    mcp = create_mcp_server(_settings())
+    result = await mcp.read_resource(f"{_SKILL_NS}/persona-interview")
+    content = _read_text(result)
+
+    assert "职业领域" in content
+    assert "专业技能" in content
+    assert "日常工作" in content
+    assert "知识结构" in content
+    assert "三张清单" in content  # structured-NL knowledge structure
+    assert "能力草图" in content  # Function/Action candidate extraction
+    assert "ActionDef" in content
+    assert "write-tfonto" in content  # conversion handoff
+    assert "persona-example" in content  # sub-resource reference
+
+
+async def test_read_write_tfonto() -> None:
+    """write-tfonto SKILL.md contains the NL→TFOnto mapping rules and self-check gate."""
+    mcp = create_mcp_server(_settings())
+    result = await mcp.read_resource(f"{_SKILL_NS}/write-tfonto")
+    content = _read_text(result)
+
+    assert "object_types" in content
+    assert "properties" in content
+    assert "link_types" in content
+    assert "trigger_words" in content
+    assert "schema_version" in content
+    assert "自检" in content  # delivery gate
+    assert "functions" in content  # capability sketch → Function/Action
+    assert "capability-layer" in content  # scenario-combination reference
+    assert "validate_tfonto" in content  # shipped validator gate
+    assert "${TFROBOT_SKILL_DIR}" in content  # A2C script execution (skill.md §9.4)
+    assert "persona-interview" in content  # upstream skill reference
+
+
+async def test_read_persona_example() -> None:
+    """persona-example covers all persona sections incl. the three KG lists and capability sketch."""
+    mcp = create_mcp_server(_settings())
+    result = await mcp.read_resource(f"{_SKILL_NS}/persona-interview/references/persona-example.md")
+    content = _read_text(result)
+
+    assert "职业领域" in content
+    assert "专业技能" in content
+    assert "日常工作" in content
+    assert "概念清单" in content
+    assert "数据字段清单" in content
+    assert "关系清单" in content
+    assert "能力草图" in content
+    assert "ActionDef" in content
+
+
+async def test_read_teacher_math_example() -> None:
+    """write-tfonto example resource embeds the validated .tfo."""
+    mcp = create_mcp_server(_settings())
+    result = await mcp.read_resource(f"{_SKILL_NS}/write-tfonto/references/teacher-math-example.md")
+    content = _read_text(result)
+
+    assert "schema_version: 7" in content
+    assert "namespace: math-teacher" in content
+    assert "object_types" in content
+    assert "trigger_words" in content
+    assert "primary_property" in content
+    assert "capability-layer" in content  # pointer to the functions/actions example
+
+
+async def test_read_capability_layer() -> None:
+    """capability-layer resource covers FunctionDef × ActionDef concepts, scenarios, and sketch."""
+    mcp = create_mcp_server(_settings())
+    result = await mcp.read_resource(f"{_SKILL_NS}/write-tfonto/references/capability-layer.md")
+    content = _read_text(result)
+
+    assert "FunctionDef" in content
+    assert "ActionDef" in content
+    assert "逻辑放 Function，治理放 Action" in content
+    assert "场景组合表" in content
+    assert "口诀" in content
+    # capability sketch examples: query 单用 / edit_set 单用 / backing 组合
+    assert "diagnose_weak_points" in content
+    assert "record_weak_point" in content
+    assert "update_mastery" in content
+    assert "refresh_mastery" in content
+    assert "edit_set" in content
+    assert "backing" in content
+    assert "side_effects" in content
+
+
+async def test_sub_resource_mime_types() -> None:
+    """Sub-resource MIME types come from the deterministic built-in map (skill.md §6.4)."""
+    mcp = create_mcp_server(_settings())
+    resources = await mcp.list_resources()
+
+    expected = {
+        f"{_SKILL_NS}/write-tfonto/references/tfonto-format.md": "text/markdown",
+        f"{_SKILL_NS}/write-tfonto/references/teacher-math.tfo": "application/yaml",
+        f"{_SKILL_NS}/write-tfonto/scripts/validate_tfonto.py": "text/x-python",
+    }
+    by_uri = {str(r.uri): r.mimeType for r in resources}
+    for uri, mime in expected.items():
+        assert by_uri.get(uri) == mime, f"{uri}: expected {mime}, got {by_uri.get(uri)}"
+
+
+def test_shipped_validator_accepts_shipped_example(tmp_path: Path) -> None:
+    """The shipped validator script (executed) accepts the shipped example .tfo."""
+    import subprocess
+    import sys
+
+    from theseus_kit.skills import build_skill_resource
+
+    script = build_skill_resource("write-tfonto", "scripts/validate_tfonto.py")
+    example = build_skill_resource("write-tfonto", "references/teacher-math.tfo")
+
+    script_path = tmp_path / "validate_tfonto.py"
+    script_path.write_text(script, encoding="utf-8")
+    example_path = tmp_path / "teacher-math.tfo"
+    example_path.write_text(example, encoding="utf-8")
+
+    proc = subprocess.run(
+        [sys.executable, str(script_path), str(example_path)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, f"validator failed:\n{proc.stdout}\n{proc.stderr}"
+    assert "校验通过" in proc.stdout
+
+
+def test_shipped_validator_rejects_bad_namespace(tmp_path: Path) -> None:
+    """The shipped validator rejects an invalid namespace (fail-loud behaviour)."""
+    import subprocess
+    import sys
+
+    from theseus_kit.skills import build_skill_resource
+
+    script = build_skill_resource("write-tfonto", "scripts/validate_tfonto.py")
+    bad = """schema_version: 7
+ontology:
+  namespace: "bad/namespace"
+"""
+
+    script_path = tmp_path / "validate_tfonto.py"
+    script_path.write_text(script, encoding="utf-8")
+    bad_path = tmp_path / "bad.tfo"
+    bad_path.write_text(bad, encoding="utf-8")
+
+    proc = subprocess.run(
+        [sys.executable, str(script_path), str(bad_path)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 1
+    assert "namespace" in proc.stdout
+
+
 async def test_read_sub_resource() -> None:
     """Each sub-resource can be read independently."""
     mcp = create_mcp_server(_settings())
@@ -298,8 +491,8 @@ async def test_each_main_skill_within_8kib() -> None:
         assert size_bytes <= 8192, f"{skill_name}: {size_bytes} bytes exceeds 8 KiB"
 
 
-async def test_each_sub_resource_within_4kib() -> None:
-    """Each sub-resource is <= 4 KiB."""
+async def test_each_reference_within_4kib() -> None:
+    """Each references/* sub-resource is <= 4 KiB (context-read documents)."""
     mcp = create_mcp_server(_settings())
     resources = await mcp.list_resources()
     sub_uris = [str(r.uri) for r in resources if str(r.uri).startswith(_SKILL_NS) and "/references/" in str(r.uri)]
@@ -309,6 +502,20 @@ async def test_each_sub_resource_within_4kib() -> None:
         content = _read_text(result)
         size_bytes = len(content.encode("utf-8"))
         assert size_bytes <= 4096, f"{uri}: {size_bytes} bytes exceeds 4 KiB"
+
+
+async def test_each_script_within_64kib() -> None:
+    """Each scripts/* sub-resource is <= 64 KiB (executed, not context-read)."""
+    mcp = create_mcp_server(_settings())
+    resources = await mcp.list_resources()
+    script_uris = [str(r.uri) for r in resources if str(r.uri).startswith(_SKILL_NS) and "/scripts/" in str(r.uri)]
+
+    assert script_uris, "expected at least one scripts/ sub-resource"
+    for uri in script_uris:
+        result = await mcp.read_resource(uri)
+        content = _read_text(result)
+        size_bytes = len(content.encode("utf-8"))
+        assert size_bytes <= 65536, f"{uri}: {size_bytes} bytes exceeds 64 KiB"
 
 
 async def test_skill_content_has_frontmatter() -> None:
@@ -364,6 +571,10 @@ async def test_skill_registry_matches_resource_list() -> None:
     for skill in SkillRegistry.all():
         uri = f"{_SKILL_NS}/{skill.name}"
         assert any(str(r.uri) == uri for r in resources), f"Missing resource for {skill.name}"
+
+        # SKILL.md itself is staged from the sub-resource (mode C registrable shape).
+        md_uri = f"{_SKILL_NS}/{skill.name}/SKILL.md"
+        assert any(str(r.uri) == md_uri for r in resources), f"Missing SKILL.md sub-resource: {md_uri}"
 
         # And all sub-resources
         for rel_path in skill.sub_resources:

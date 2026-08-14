@@ -70,7 +70,7 @@ uv run poe ci && uv run poe build && uv run poe package-check
 1. **MCP 表面层**（`server.py`）— FastMCP 实例，工具/资源声明
 2. **应用服务层**（尚未实现）— 读、编辑、保存模板、发布用例
 3. **TFRobot 客户端**（`transport.py`、`routing.py`、`tokens.py`、`credentials.py`）— 认证 HTTP 适配器，对接 `/v1/factory/**` 和 `/llms.txt`
-4. **资源投影层**（`window://` / `skill://`，尚未实现）
+4. **资源投影层** — `window://` 实时快照（`resources.py`）与 `skill://` 技能指南（`skills/`，7 个类别，含 persona-interview → write-tfonto 画像调研链）
 
 ### 认证与路由（第 3 层，#17 已交付）
 
