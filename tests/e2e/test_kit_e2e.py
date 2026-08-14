@@ -57,10 +57,15 @@ _E2E_ENABLED = bool(os.environ.get("THESEUS_E2E"))
 
 _SKILLS = (
     "analyze-config",
+    "apply-config-plan",
+    "enhance",
     "manage-topology",
     "persona-interview",
+    "persona-optimize",
+    "plan-config",
     "publish-config",
     "save-template",
+    "theseus",
     "tune-config",
     "write-tfonto",
 )

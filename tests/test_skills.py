@@ -21,10 +21,15 @@ _SKILL_NS = "skill://com.a2c-smcp.theseus-kit"
 # New skill categories
 _NEW_SKILLS = (
     "analyze-config",
+    "apply-config-plan",
+    "enhance",
     "manage-topology",
     "persona-interview",
+    "persona-optimize",
+    "plan-config",
     "publish-config",
     "save-template",
+    "theseus",
     "tune-config",
     "write-tfonto",
 )
@@ -104,6 +109,7 @@ async def test_sub_resources_exist() -> None:
         f"{_SKILL_NS}/analyze-config/references/needs-extraction.md",
         f"{_SKILL_NS}/manage-topology/references/factory-selection.md",
         f"{_SKILL_NS}/persona-interview/references/persona-example.md",
+        f"{_SKILL_NS}/theseus/references/persona-format.md",
         f"{_SKILL_NS}/tune-config/references/field-design.md",
         f"{_SKILL_NS}/tune-config/references/conflict-resolution.md",
         f"{_SKILL_NS}/tune-config/references/validation-strategy.md",
@@ -121,12 +127,12 @@ async def test_sub_resources_exist() -> None:
 
 
 async def test_resource_count() -> None:
-    """Total skill resources is 7 main + 7 SKILL.md subs + 15 sub + 3 legacy = 32 (plus 2 window = 34)."""
+    """Total skill resources is 12 main + 12 SKILL.md subs + 16 sub + 3 legacy = 43 (plus 2 window = 45)."""
     mcp = create_mcp_server(_settings())
     resources = await mcp.list_resources()
     skill_uris = [str(r.uri) for r in resources if str(r.uri).startswith(_SKILL_NS)]
-    # 7 main + 7 SKILL.md subs + 15 sub + 3 legacy = 32
-    assert len(skill_uris) == 32, f"Expected 32 skill resources, got {len(skill_uris)}: {skill_uris}"
+    # 12 main + 12 SKILL.md subs + 16 sub + 3 legacy = 43
+    assert len(skill_uris) == 43, f"Expected 43 skill resources, got {len(skill_uris)}: {skill_uris}"
 
 
 # -- Resource annotations ---------------------------------------------------
@@ -276,6 +282,7 @@ async def test_read_persona_interview() -> None:
     assert "ActionDef" in content
     assert "write-tfonto" in content  # conversion handoff
     assert "persona-example" in content  # sub-resource reference
+    assert "workspaces" in content  # 落盘到机器人工作区（阶段交接物）
 
 
 async def test_read_write_tfonto() -> None:
@@ -341,6 +348,92 @@ async def test_read_engineering_memory_example() -> None:
     assert "supersede_decision" in content
     assert "4 个属性 + 2 条边" in content  # Action 多属性变更核心价值
     assert "逐个 Property 修改" in content
+
+
+async def test_read_theseus() -> None:
+    """theseus master skill defines the 3-stage pipeline, workspace layout, and dispatch."""
+    mcp = create_mcp_server(_settings())
+    result = await mcp.read_resource(f"{_SKILL_NS}/theseus")
+    content = _read_text(result)
+
+    assert "三阶段" in content or "阶段一" in content  # 流水线总纲
+    assert "persona-interview" in content  # 阶段一分派
+    assert "persona-optimize" in content
+    assert "plan-config" in content  # 阶段二分派
+    assert "apply-config-plan" in content  # 阶段三分派
+    assert "~/.theseus/workspaces/" in content  # 工作区约定
+    assert "persona-format" in content  # 画像规范格式引用
+    assert "安全不变量" in content  # 凭证不出进程、发布显式
+
+
+async def test_read_persona_optimize() -> None:
+    """persona-optimize drives incremental changes with reasons into the changelog section."""
+    mcp = create_mcp_server(_settings())
+    result = await mcp.read_resource(f"{_SKILL_NS}/persona-optimize")
+    content = _read_text(result)
+
+    assert "变更记录" in content  # changelog section of persona.md
+    assert "为什么" in content  # rationale probing
+    assert "plan-config" in content  # knowledge-graph changes hand off
+
+
+async def test_read_plan_config() -> None:
+    """plan-config: persona → configs/ artifacts + progressive disclosure + SubTask + plan file."""
+    mcp = create_mcp_server(_settings())
+    result = await mcp.read_resource(f"{_SKILL_NS}/plan-config")
+    content = _read_text(result)
+
+    assert "configs/" in content  # structured config artifacts
+    assert "plans/" in content  # plan file output
+    assert "SubTask" in content  # progress tracking
+    assert "get_config_summary" in content  # progressive disclosure entry
+    assert "list_config_nodes" in content
+    assert "get_config_detail" in content
+    assert "get_config_value" in content
+    assert "write-tfonto" in content  # atomic skill delegation
+    assert "validate_tfonto.py" in content  # validation gate
+    assert "TODO" in content  # heavy details deferred (渐进披露 / TFOnto 本体)
+
+
+async def test_read_apply_config_plan() -> None:
+    """apply-config-plan: plan → Draft → Template decision → validation → publish negotiation."""
+    mcp = create_mcp_server(_settings())
+    result = await mcp.read_resource(f"{_SKILL_NS}/apply-config-plan")
+    content = _read_text(result)
+
+    assert "create_draft" in content
+    assert "update_draft" in content
+    assert "save-template" in content  # template negotiation
+    assert "validate_draft" in content  # validation gate
+    assert "publish_config" in content  # explicit publish negotiation
+    assert "不可逆" in content  # publish is irreversible
+
+
+async def test_read_enhance() -> None:
+    """enhance skill formalizes the feedback loop: redacted context + suggestion → repo Issue."""
+    mcp = create_mcp_server(_settings())
+    result = await mcp.read_resource(f"{_SKILL_NS}/enhance")
+    content = _read_text(result)
+
+    assert "gh issue create" in content  # filing mechanism
+    assert "A2C-SMCP/theseus-kit" in content  # target repo
+    assert "脱敏" in content  # redaction discipline
+    assert "建议" in content  # problem + suggestion pairing
+    assert "TFRobotServer" in content  # upstream proposals welcome
+
+
+async def test_read_persona_format() -> None:
+    """persona-format defines the normative persona.md sections incl. the changelog."""
+    mcp = create_mcp_server(_settings())
+    result = await mcp.read_resource(f"{_SKILL_NS}/theseus/references/persona-format.md")
+    content = _read_text(result)
+
+    assert "岗位职责" in content
+    assert "技术要求" in content
+    assert "工作范围" in content
+    assert "知识图谱定义" in content
+    assert "变更记录" in content  # changelog as standard section
+    assert "评审" in content  # user confirmation gate
 
 
 async def test_read_capability_layer() -> None:

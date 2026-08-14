@@ -1,0 +1,56 @@
+"""Skill: plan-config — 阶段二：画像 → 配置修改计划。
+
+The middle tier.  Converts the confirmed persona into structured config
+artifacts under ``configs/`` (via write-tfonto for the .tfo and topic YAMLs
+otherwise), surveys the real configuration through the progressive-disclosure
+tools (summary → nodes → detail → value, never full-tree reads), tracks
+progress with SubTasks, and freezes one plan file under ``plans/`` for the
+apply stage.  The two heaviest details — progressive disclosure of the real
+config and of the TFOnto ontology via TFS Action — are marked TODO for a
+dedicated follow-up.
+"""
+
+from __future__ import annotations
+
+from ._registry import SkillDef
+
+SKILL = SkillDef(
+    name="plan-config",
+    description="阶段二——把已确认的机器人画像转换为结构化配置并固化修改计划：产出 configs/ 工件，渐进披露调研真实配置，SubTask 追踪进度，落一份 plans/ 计划文件。",
+    content={
+        "SKILL.md": """---
+name: plan-config
+description: 阶段二——把已确认的机器人画像转换为结构化配置并固化修改计划：调用 write-tfonto 等原子技能产出 configs/ 工件，借助渐进披露调研当前真实配置（先拓扑后展开），用 SubTask 追踪进度，最终落一份 plans/ 计划文件。当阶段一画像已确认、需要落实配置修改时使用。
+---
+
+# Plan Config —— 画像 → 配置修改计划
+
+## 输入 / 输出
+
+- 输入：`<slug>/<slug>.md`（只消费经用户确认的内容，含「变更记录」中的未落实变更）
+- 输出：`configs/` 结构化工件（.tfo / YAML / JSON）+ `plans/<slug>-<日期>-<主题>.md` 计划文件（一次编辑一份）
+
+## 流程
+
+1. **建 SubTask 清单**：先把画像 → 配置的全部工作拆成子任务（每项一个可勾销的产出物），逐项勾销；过程中发现新子任务随时补入——干到一半也不丢进度、不漏任务
+2. **知识图谱转换**：三张清单 + 状态流转 + 能力草图 → **write-tfonto** 技能 → `configs/<slug>.tfo`；写完必须过 `scripts/validate_tfonto.py`（write-tfonto 收稿门槛）
+3. **其余配置转换**：岗位职责 / 技术要求 / 工作范围 → 对应配置项的 YAML/JSON 工件（命名 `configs/<主题>.yaml`），字段形状以目标配置项为准
+4. **渐进披露调研**：当前真实配置通过 MCP 工具读取——先 `get_config_summary` 看拓扑，再 `list_config_nodes` / `get_config_detail` 展开**有必要编辑**的节点，`get_config_value` 取具体值。逐步展开，绝不整树读入
+5. **复杂配置写脚本**：需要批量/结构化处理时写脚本（TFOnto 校验即先例）；脚本放工作区，执行用绝对路径（TODO: 工作区脚本的存放与执行契约待细节阶段定——A2C 的 `${TFROBOT_SKILL_DIR}` 只适用于技能包内脚本）
+6. **固化计划**：产出 `plans/` 计划文件，供阶段三逐条执行
+
+## 渐进披露（本技能最关键的两处细节，TODO）
+
+- **真实配置的渐进披露**（步骤 4）：拓扑 → 展开的具体操作序列、上下文预算的逐级用法（8 KiB 默认 / 32 KiB 硬上限）、draft/template/online 三态的选择时机——细节与上下文管理模式（是否需要 SubAgent 分担）**待单独讨论后固化**；过渡期以 analyze-config 技能的 LLMTEXT 策略为参照
+- **TFOnto 本体的渐进披露**：当前本体结构定义如何借助 TFS Action 渐进式披露，定位「哪里需要改、如何改」，步骤化处理的细节**待单独讨论后固化**；过渡期以 write-tfonto 的校验器 + 两个范例为参照
+
+## Plan 文件格式（TODO）
+
+字段与结构待设计（建议包含：目标 / 依据画像章节 / 涉及配置节点清单 / 操作序列 / 校验门 / 回滚），细节阶段固化。
+
+## 交接
+
+计划文件经用户确认后交 **apply-config-plan**（阶段三）。本技能不落 Draft、不发布。
+""",
+    },
+)

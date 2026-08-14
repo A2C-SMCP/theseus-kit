@@ -103,20 +103,30 @@ def _load_all() -> dict[str, SkillDef]:
     """Import and index every skill def from the per-category modules."""
     from . import (
         _analyze_config,
+        _apply_config_plan,
+        _enhance,
         _manage_topology,
         _persona_interview,
+        _persona_optimize,
+        _plan_config,
         _publish_config,
         _save_template,
+        _theseus,
         _tune_config,
         _write_tfonto,
     )
 
     modules = [
         _analyze_config,
+        _apply_config_plan,
+        _enhance,
         _manage_topology,
         _persona_interview,
+        _persona_optimize,
+        _plan_config,
         _publish_config,
         _save_template,
+        _theseus,
         _tune_config,
         _write_tfonto,
     ]

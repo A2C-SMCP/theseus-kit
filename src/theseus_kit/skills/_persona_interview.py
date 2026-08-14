@@ -110,9 +110,9 @@ description: 通过采访需求方获取机器人用户画像——职业领域�
 
 ### Step 6 汇总落盘
 
-- 输出画像文档，默认建议 `docs/personas/<机器人名>.md`，路径与需求方确认。
-- 画像文档按五部分组织（结构见 `references/persona-example.md`）；知识结构部分放三张清单全文，能力草图放候选清单。
-- 随后读取 write-tfonto 技能（`skill://com.a2c-smcp.theseus-kit/write-tfonto`），把三张清单与能力草图转换为 `.tfo`，与画像文档一并交付。
+- 输出画像文档到工作区 `~/.theseus/workspaces/<slug>/<slug>.md`（slug = 当前配置 `THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID` 的 `:`→`-` 清洗），路径与需求方确认。
+- 画像文档按 theseus 技能的 `references/persona-format.md` 规范格式组织（历史五部分结构见 `references/persona-example.md`）；知识图谱定义章节放三张清单全文与能力草图候选清单。
+- 随后读取 write-tfonto 技能（`skill://com.a2c-smcp.theseus-kit/write-tfonto`），把三张清单与能力草图转换为 `.tfo`，放工作区 `configs/`，与画像文档一并交付。
 
 ## 采访纪律
 
