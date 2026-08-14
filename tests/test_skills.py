@@ -110,6 +110,8 @@ async def test_sub_resources_exist() -> None:
         f"{_SKILL_NS}/manage-topology/references/factory-selection.md",
         f"{_SKILL_NS}/persona-interview/references/persona-example.md",
         f"{_SKILL_NS}/theseus/references/persona-format.md",
+        f"{_SKILL_NS}/theseus/references/workspace-layout.md",
+        f"{_SKILL_NS}/theseus/references/context-isolation.md",
         f"{_SKILL_NS}/tune-config/references/field-design.md",
         f"{_SKILL_NS}/tune-config/references/conflict-resolution.md",
         f"{_SKILL_NS}/tune-config/references/validation-strategy.md",
@@ -127,12 +129,12 @@ async def test_sub_resources_exist() -> None:
 
 
 async def test_resource_count() -> None:
-    """Total skill resources is 12 main + 12 SKILL.md subs + 16 sub + 3 legacy = 43 (plus 2 window = 45)."""
+    """Total skill resources is 12 main + 12 SKILL.md subs + 18 sub + 3 legacy = 45 (plus 2 window = 47)."""
     mcp = create_mcp_server(_settings())
     resources = await mcp.list_resources()
     skill_uris = [str(r.uri) for r in resources if str(r.uri).startswith(_SKILL_NS)]
-    # 12 main + 12 SKILL.md subs + 16 sub + 3 legacy = 43
-    assert len(skill_uris) == 43, f"Expected 43 skill resources, got {len(skill_uris)}: {skill_uris}"
+    # 12 main + 12 SKILL.md subs + 18 sub + 3 legacy = 45
+    assert len(skill_uris) == 45, f"Expected 45 skill resources, got {len(skill_uris)}: {skill_uris}"
 
 
 # -- Resource annotations ---------------------------------------------------
@@ -283,6 +285,8 @@ async def test_read_persona_interview() -> None:
     assert "write-tfonto" in content  # conversion handoff
     assert "persona-example" in content  # sub-resource reference
     assert "workspaces" in content  # 落盘到机器人工作区（阶段交接物）
+    assert "工具需求" in content  # 自然语言工具需求追问（技术要求）
+    assert "选型" in content  # 选型留给阶段二（采访纪律）
 
 
 async def test_read_write_tfonto() -> None:
@@ -319,6 +323,7 @@ async def test_read_persona_example() -> None:
     assert "能力草图" in content
     assert "状态流转" in content  # new collection axis demonstrated
     assert "ActionDef" in content
+    assert "工具需求" in content  # natural-language tool needs subsection
 
 
 async def test_read_teacher_math_example() -> None:
@@ -363,6 +368,8 @@ async def test_read_theseus() -> None:
     assert "apply-config-plan" in content  # 阶段三分派
     assert "~/.theseus/workspaces/" in content  # 工作区约定
     assert "persona-format" in content  # 画像规范格式引用
+    assert "workspace-layout" in content  # 布局细则引用
+    assert "context-isolation" in content  # 上下文隔离与交接引用
     assert "安全不变量" in content  # 凭证不出进程、发布显式
 
 
@@ -374,6 +381,7 @@ async def test_read_persona_optimize() -> None:
 
     assert "变更记录" in content  # changelog section of persona.md
     assert "为什么" in content  # rationale probing
+    assert "技术要求" in content  # toolchain-needs impact tagging
     assert "plan-config" in content  # knowledge-graph changes hand off
 
 
@@ -392,6 +400,12 @@ async def test_read_plan_config() -> None:
     assert "get_config_value" in content
     assert "write-tfonto" in content  # atomic skill delegation
     assert "validate_tfonto.py" in content  # validation gate
+    assert "context-isolation" in content  # host-isolation mechanism resolved
+    assert "toolchain.yaml" in content  # toolchain selection artifact
+    assert "自然语言" in content  # persona tool needs are plain-language; conversion here
+    assert "Marketplace" in content  # source 1: official marketplace
+    assert "WebSearch" in content  # sources 2/3: open-world search
+    assert "自研" in content  # user-provided plugins welcome
     assert "TODO" in content  # heavy details deferred (渐进披露 / TFOnto 本体)
 
 
@@ -434,6 +448,40 @@ async def test_read_persona_format() -> None:
     assert "知识图谱定义" in content
     assert "变更记录" in content  # changelog as standard section
     assert "评审" in content  # user confirmation gate
+    assert "必须掌握的工具" in content  # 技术要求用自然语言描述（用户听得懂）
+    assert "自然语言" in content  # 工具需求不写专业选型术语，转换在阶段二
+
+
+async def test_read_context_isolation() -> None:
+    """context-isolation: host-agnostic isolation points + per-host guides (Claude Code / Codex / Chain)."""
+    mcp = create_mcp_server(_settings())
+    result = await mcp.read_resource(f"{_SKILL_NS}/theseus/references/context-isolation.md")
+    content = _read_text(result)
+
+    assert "隔离点位" in content  # when to isolate
+    assert ".claude/agents" in content  # Claude Code subagent config example
+    assert "theseus-explorer" in content  # concrete subagent definition
+    assert "Codex" in content  # same concept, different host
+    assert "Chain" in content  # TFRobotServer native isolation unit
+    assert "Trace" in content  # trace injection on/off contract
+    assert "TODO" in content  # Chain config details deferred until TFRS back + llms.txt evidence
+    assert "只依赖文件" in content  # file-based handoff, not session memory
+
+
+async def test_read_workspace_layout() -> None:
+    """workspace-layout details the configs/ artifact design (naming, gates, lifecycle)."""
+    mcp = create_mcp_server(_settings())
+    result = await mcp.read_resource(f"{_SKILL_NS}/theseus/references/workspace-layout.md")
+    content = _read_text(result)
+
+    assert "configs/" in content
+    assert "ontology.tfo" in content  # artifact naming example
+    assert "validate_tfonto.py" in content  # .tfo gate
+    assert "yaml.safe_load" in content  # YAML/JSON gate
+    assert "plans/" in content
+    assert "scripts/" in content
+    assert "tmp/" in content
+    assert "中间物" in content  # artifacts are intermediate, no auto-sync
 
 
 async def test_read_capability_layer() -> None:
