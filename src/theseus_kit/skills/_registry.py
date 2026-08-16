@@ -8,7 +8,26 @@ canonical list that ``server.py`` iterates to register MCP resources and
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
+from pathlib import Path
+
+
+def _iter_content_files(root_path: Path) -> Iterator[Path]:
+    """Yield the text content files of a skill package, in walk order.
+
+    Runtime artifacts are never skill content: ``__pycache__`` (pip
+    byte-compiles every ``.py`` at install time, so a wheel install carries
+    compiled files a source checkout never has) and hidden files/dirs
+    (``.DS_Store`` etc. on developer machines).  Both are matched
+    segment-wise, at any nesting depth **below the package root only** —
+    ancestor segments are not content, and install layouts like uv's
+    ``.venv`` carry dot-prefixed ancestors by design.
+    """
+    for path in root_path.rglob("*"):
+        rel_parts = path.relative_to(root_path).parts
+        if path.is_file() and all(not part.startswith(".") and part != "__pycache__" for part in rel_parts):
+            yield path
 
 
 def load_package_skill(package_rel: str, name: str, description: str) -> SkillDef:
@@ -16,18 +35,18 @@ def load_package_skill(package_rel: str, name: str, description: str) -> SkillDe
 
     *package_rel* is a folder under ``theseus_kit.skills`` following the
     marketplace SKILL v1 package shape — ``SKILL.md`` plus optional
-    ``references/`` and ``scripts/`` subfolders.  Every file is read verbatim
-    and becomes a ``rel_path`` content key.  A missing ``SKILL.md`` raises
-    ``ValueError`` (fail-loud packaging guard).
+    ``references/`` and ``scripts/`` subfolders.  Every content file is read
+    verbatim and becomes a ``rel_path`` content key (runtime artifacts like
+    ``__pycache__`` and dotfiles are skipped).  A missing ``SKILL.md``
+    raises ``ValueError`` (fail-loud packaging guard).
     """
     from importlib.resources import as_file, files
 
     root = files("theseus_kit.skills").joinpath(package_rel)
     with as_file(root) as root_path:
         content: dict[str, str] = {}
-        for path in root_path.rglob("*"):
-            if path.is_file():
-                content[path.relative_to(root_path).as_posix()] = path.read_text(encoding="utf-8")
+        for path in _iter_content_files(root_path):
+            content[path.relative_to(root_path).as_posix()] = path.read_text(encoding="utf-8")
     if "SKILL.md" not in content:
         raise ValueError(f"Skill package {package_rel!r} is missing SKILL.md — packaging bug?")
     return SkillDef(name=name, description=description, content=content)

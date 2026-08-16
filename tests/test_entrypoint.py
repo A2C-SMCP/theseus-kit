@@ -18,6 +18,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.types import PaginatedRequestParams
@@ -25,6 +26,8 @@ from pydantic import SecretStr
 
 from theseus_kit.config import TheseusSettings
 from theseus_kit.server import create_mcp_server
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 
 _KIT_ENV = {
     "THESEUS_ROBOT__ROBOT_ID": "entry-robot",
@@ -49,6 +52,18 @@ def _subprocess_env(**overrides: str) -> dict[str, str]:
     return env
 
 
+def _ci() -> bool:
+    """GitHub Actions sets CI=true; treat "", "0", "false" as not-CI."""
+    return os.environ.get("CI", "").lower() not in ("", "0", "false")
+
+
+def _checked(cmd: list[str], *, cwd: Path) -> None:
+    """Run a setup command; on failure surface its captured output in CI logs."""
+    proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise AssertionError(f"command failed ({cmd}):\n{proc.stdout}\n{proc.stderr}")
+
+
 async def _composition_root_surface() -> tuple[set[str], set[str]]:
     """Tools + resource URIs served by the settings-driven composition root."""
     settings = TheseusSettings(
@@ -71,16 +86,10 @@ async def _composition_root_surface() -> tuple[set[str], set[str]]:
     return tools, uris
 
 
-async def test_console_entry_serves_composition_root_surface(tmp_path: Path) -> None:
-    """The console entry serves the same tools/resources as the composition root."""
-    expected_tools, expected_uris = await _composition_root_surface()
-
-    params = StdioServerParameters(
-        command=sys.executable,
-        args=["-m", "theseus_kit"],
-        env=_subprocess_env(**_KIT_ENV),
-        cwd=str(tmp_path),
-    )
+async def _assert_served_surface(
+    params: StdioServerParameters, expected_tools: set[str], expected_uris: set[str]
+) -> None:
+    """Drive *params* over real stdio and assert exact surface parity."""
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
@@ -102,6 +111,19 @@ async def test_console_entry_serves_composition_root_surface(tmp_path: Path) -> 
     assert expected_tools and tool_names, f"tools must not degenerate to empty; got {sorted(tool_names)}"
     assert tool_names == expected_tools, "entry tools must match the composition root surface"
     assert uris == expected_uris, "entry resources must match the composition root surface"
+
+
+async def test_console_entry_serves_composition_root_surface(tmp_path: Path) -> None:
+    """The console entry serves the same tools/resources as the composition root."""
+    expected_tools, expected_uris = await _composition_root_surface()
+
+    params = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "theseus_kit"],
+        env=_subprocess_env(**_KIT_ENV),
+        cwd=str(tmp_path),
+    )
+    await _assert_served_surface(params, expected_tools, expected_uris)
 
 
 def test_console_entry_without_config_fails_fast(tmp_path: Path) -> None:
@@ -173,3 +195,40 @@ def test_console_entry_config_error_keeps_long_env_hints(tmp_path: Path) -> None
     assert "THESEUS_CREDENTIAL__AUTHORIZATION_SERVER" in proc.stderr, (
         f"40-char env hint must survive scrubbing: {proc.stderr!r}"
     )
+
+
+@pytest.mark.skipif(not _ci(), reason="wheel smoke runs in CI (CI=1 to force locally)")
+async def test_wheel_install_console_script_serves_full_surface(tmp_path: Path) -> None:
+    """The installed WHEEL's console script serves the full surface (PyPI path).
+
+    Builds the wheel, installs it into a throwaway venv, and launches the
+    real ``theseus-kit`` console script over stdio.  Only a wheel install
+    exercises the delivery-path differences from a source checkout: pip's
+    byte-compilation of ``.py`` files inside skill packages (the
+    ``__pycache__`` walk collision) and the console-script entry wiring.
+    ``--system-site-packages`` skips dependency downloads — the host env
+    already carries them, so pip installs only the wheel itself.
+    """
+    build_dir = tmp_path / "dist"
+    _checked(["uv", "build", "--out-dir", str(build_dir)], cwd=_REPO_ROOT)
+    wheels = list(build_dir.glob("*.whl"))
+    assert len(wheels) == 1, f"expected one wheel, got {wheels}"
+
+    # Dot-prefixed on purpose: uv's default layout (`.venv`) puts a hidden
+    # segment in the skill package's ancestors — a delivery-path shape the
+    # content walk must not trip over.
+    venv_dir = tmp_path / ".venv"
+    _checked([sys.executable, "-m", "venv", "--system-site-packages", str(venv_dir)], cwd=tmp_path)
+    _checked([str(venv_dir / "bin" / "pip"), "install", "--quiet", str(wheels[0])], cwd=tmp_path)
+    console_script = venv_dir / "bin" / "theseus-kit"
+    assert console_script.is_file(), "wheel must ship the theseus-kit console script"
+
+    expected_tools, expected_uris = await _composition_root_surface()
+
+    params = StdioServerParameters(
+        command=str(console_script),
+        args=[],
+        env=_subprocess_env(**_KIT_ENV),
+        cwd=str(tmp_path),
+    )
+    await _assert_served_surface(params, expected_tools, expected_uris)
