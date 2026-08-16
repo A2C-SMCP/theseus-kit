@@ -70,7 +70,7 @@ uv run poe ci && uv run poe build && uv run poe package-check
 1. **MCP 表面层**（`server.py`）— FastMCP 实例，工具/资源声明
 2. **应用服务层**（尚未实现）— 读、编辑、保存模板、发布用例
 3. **TFRobot 客户端**（`transport.py`、`routing.py`、`tokens.py`、`credentials.py`）— 认证 HTTP 适配器，对接 `/v1/factory/**` 和 `/llms.txt`
-4. **资源投影层**（`window://` / `skill://`，尚未实现）
+4. **资源投影层** — `window://` 实时快照（`resources.py`）与 `skill://` 技能指南（`skills/`，12 个类别，三层结构）：`theseus` 总纲调度 → 阶段技能 `persona-interview` / `persona-optimize` / `plan-config` / `apply-config-plan` → 原子技能 `analyze-config` / `manage-topology` / `tune-config` / `save-template` / `publish-config` / `write-tfonto`，外加反馈闭环技能 `enhance`。阶段交接物在机器人工作区 `~/.theseus/workspaces/<slug>/`（画像 `<slug>.md` + `configs/` + `plans/`）
 
 ### 认证与路由（第 3 层，#17 已交付）
 
@@ -114,6 +114,14 @@ TheseusSettings (env/.env)
 - 所有 SecretStr 字段的默认 `repr` 不会暴露密钥；`redact_secrets()` 对所有错误消息做二次清洗
 - `config:read`、`config:write`、`config:publish` 三个 scope 分别对应只读、写入、发布能力
 - 发布是显式操作，不会作为草稿编辑或模板保存的副作用触发
+
+## 三段式开发思路（SKILL 系统方法论）
+
+机器人配置工作分三段：**画像 → 计划 → 落地**（技能侧：persona-interview / persona-optimize → plan-config → apply-config-plan，总纲 `theseus`）。开发与迭代遵循三条思路：
+
+1. **一切按步骤可落地**：每阶段产出可物化的交接物（画像 `<slug>.md`、`configs/` 工件、`plans/` 计划），谁接手都能从文件续上、不依赖会话记忆。若某步骤步长过长导致上下文不稳定（如整树读入真实配置），**增加中间物化步骤**——物化数据按工作区结构策略落盘：`~/.theseus/workspaces/<slug>/`（画像根 + `configs/` + `plans/`，脚本与临时产物另定子目录）。
+2. **自然语言 → Markdown → 结构化数据 → 工具调用**：数据形态从前到后逐步转换，落入真实系统的只有工具调用；过程中任何格式与数据结构都可灵活调整，按用户真实使用中暴露的问题**针对性强化的当前系统**（画像规范格式、Plan 文件格式等允许随实践演进）。
+3. **上下游都可以提意见**：TFRobotServer / tfrs 相关库同为 @JQQ 维护——只要合理就提修改建议（如 llms.txt 的调整可商议后直接决策），不因「不是本仓库」而憋着。用户体验不佳时，调用 **enhance** 技能向本仓库（A2C-SMCP/theseus-kit）提交 Issue（问题 + 建议成对、上下文脱敏），由维护者审核处理。
 
 ## 测试约定
 

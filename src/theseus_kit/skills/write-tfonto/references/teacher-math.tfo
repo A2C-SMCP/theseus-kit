@@ -1,0 +1,125 @@
+# TFOnto native format v7
+# 范例：初中数学教学机器人知识结构（write-tfonto 技能资源）
+schema_version: 7
+ontology:
+  namespace: math-teacher
+
+object_types:
+  - name: Student
+    pos: [noun]
+    name_properties: [student_name]
+    primary_property: student_id
+  - name: KnowledgePoint
+    pos: [noun]
+    name_properties: [point_name]
+  - name: Exercise
+    pos: [noun]
+    name_properties: [exercise_title]
+  - name: Unit
+    pos: [noun]
+    name_properties: [unit_name]
+
+properties:
+  - name: student_name
+    domain: [Student]
+    data_range:
+      type: string
+  - name: student_id
+    domain: [Student]
+    data_range:
+      type: string
+    characteristics:
+      is_functional: true
+  - name: grade_level
+    domain: [Student]
+    data_range:
+      type: integer
+  - name: point_name
+    domain: [KnowledgePoint]
+    data_range:
+      type: string
+  - name: difficulty
+    domain: [KnowledgePoint, Exercise]
+    data_range:
+      type: string
+      enum: [easy, medium, hard]
+  - name: exercise_title
+    domain: [Exercise]
+    data_range:
+      type: string
+  - name: unit_name
+    domain: [Unit]
+    data_range:
+      type: string
+
+link_types:
+  - name: knows_well
+    domain: [Student]
+    range: [KnowledgePoint]
+    trigger_words: [掌握, 擅长, 熟练]
+  - name: struggles_with
+    domain: [Student]
+    range: [KnowledgePoint]
+    trigger_words: [薄弱, 不擅长, 总错]
+  - name: covers
+    domain: [KnowledgePoint]
+    range: [Exercise]
+    trigger_words: [覆盖, 考察]
+  - name: part_of
+    domain: [KnowledgePoint]
+    range: [Unit]
+    trigger_words: [属于, 隶属]
+  - name: prerequisite_of
+    domain: [KnowledgePoint]
+    range: [KnowledgePoint]
+    trigger_words: [前置知识, 先学]
+
+# —— 能力草图 ——
+
+functions:
+  - name: diagnose_weak_points
+    # 只读计算（错因诊断）：query 单用，不动数据、无需 Action
+    kind: query
+    signature:
+      inputs:
+        type: object
+        properties:
+          student_id: {type: string}
+      output: {type: array, items: {type: string}}
+    body: {ref: script, language: tfdsl, source: ""}
+    depends_on: [Student, KnowledgePoint, struggles_with]
+  - name: update_mastery
+    # 复杂写入（先查错题、再算薄弱点、再批量改边）：edit 承载逻辑
+    kind: edit
+    signature:
+      inputs:
+        type: object
+        properties:
+          student_id: {type: string}
+      output: {type: object}
+    body: {ref: script, language: tfdsl, source: ""}
+    depends_on: [Student, KnowledgePoint, knows_well, struggles_with]
+
+actions:
+  - name: record_weak_point
+    # 简单写入（记一条薄弱点）：Action + edit_set 声明式模板零代码
+    parameters:
+      - {name: student_id, type: {type: string}}
+      - {name: point_id, type: {type: string}}
+    edit_set:
+      ops:
+        - op: add_link
+          link_type: struggles_with
+          source: {node: param, param: student_id}
+          target: {node: param, param: point_id}
+    submission_criteria:
+      - condition: {node: compare, op: is_not_null, left: {node: param, param: student_id}}
+        message: 学生 ID 不能为空
+    side_effects:
+      - {ref: event, event: mastery_updated}
+  - name: refresh_mastery
+    # 复杂写入的组合用法：Action 只留治理信封，逻辑全部在 backing 的 edit Function
+    parameters:
+      - {name: student_id, type: {type: string}}
+    backing: {ref: def, function_id: update_mastery}
+
