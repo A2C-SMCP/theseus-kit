@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from types import UnionType
+from typing import TYPE_CHECKING, Any, Union, get_args, get_origin
 
 from mcp.server.auth.provider import AccessToken
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import Annotations
-from pydantic import AnyHttpUrl, AnyUrl
+from pydantic import AnyHttpUrl, AnyUrl, BaseModel, ValidationError
 
 from .config import OAuthConfig, TheseusSettings
 from .models import (
@@ -25,6 +27,7 @@ from .models import (
     TemplateResponse,
     UpdateDraftResponse,
 )
+from .redaction import redact_secrets
 
 if TYPE_CHECKING:
     from .oauth import TheseusTokenVerifier
@@ -571,6 +574,113 @@ def _parse_space_separated(scopes: str) -> frozenset[str]:
     return frozenset(s for s in scopes.split() if s)
 
 
+def _format_settings_errors(exc: ValidationError) -> str:
+    """Format a settings validation failure as an actionable console message.
+
+    One line per error: dotted field path, pydantic message, and the
+    corresponding ``THESEUS_*`` environment variable to fix.  When a whole
+    nested object is missing (e.g. ``robot``), the hint expands to its
+    required child env vars so the user knows exactly what to set.
+
+    Only the pydantic message text is passed through
+    :func:`~theseus_kit.redaction.redact_secrets` — it can echo
+    user-supplied values (e.g. the URL validators' ``got {value!r}``).
+    The env hints are generated from field paths, which are always safe;
+    scrubbing the whole line would swallow them, because some (e.g.
+    ``THESEUS_CREDENTIAL__AUTHORIZATION_SERVER``) are 40+ chars of pure
+    ``[A-Za-z0-9_-]`` and match the opaque-token pattern.
+    """
+    lines = ["theseus-kit: invalid or missing configuration (THESEUS_* environment variables or .env):"]
+    for err in exc.errors(include_url=False):
+        loc = ".".join(str(part) for part in err["loc"])
+        message = redact_secrets(err["msg"])
+        env_hint = _env_hint_for(err["loc"], err["msg"])
+        lines.append(f"  - {loc}: {message} (env: {env_hint})")
+    return "\n".join(lines)
+
+
+def _match_union_variant(union: object, discriminator: str, tag: str) -> type[BaseModel] | None:
+    """Return the union variant whose discriminator value equals *tag*."""
+    if get_origin(union) not in (Union, UnionType):
+        return None
+    for variant in get_args(union):
+        if not (isinstance(variant, type) and issubclass(variant, BaseModel)):
+            continue
+        field_info = variant.model_fields.get(discriminator)
+        if field_info is not None and field_info.default == tag:
+            return variant
+    return None
+
+
+def _env_hint_for(loc: tuple[object, ...], msg: str) -> str:
+    """Return the ``THESEUS_*`` env name (or names) that fix one error.
+
+    Validation-error field paths can contain a union variant tag — the
+    discriminator value, e.g. ``oauth`` in
+    ``credential.oauth.authorization_server`` — which is NOT part of the env
+    var name; the model walk skips such segments.  ``Field required`` on a
+    top-level settings field means the whole nested object is absent; for a
+    concrete model field, list its required child env vars instead of the
+    bare (non-actionable) object prefix.
+    """
+    # Derive from SettingsConfigDict (config.py) — the single source of truth,
+    # so the hints can never silently drift from the settings loader.
+    env_prefix = str(TheseusSettings.model_config.get("env_prefix", "")).upper()
+    env_delim = str(TheseusSettings.model_config.get("env_nested_delimiter", "__"))
+
+    env_parts: list[str] = []
+    current: type[BaseModel] = TheseusSettings
+    pending_union: tuple[object, str] | None = None
+
+    for part in loc:
+        name = str(part)
+        field_info = current.model_fields.get(name)
+        if field_info is None:
+            # Not a field — a variant tag from the pending discriminated union.
+            if pending_union is None:
+                break  # unknown path shape; keep the parts collected so far
+            variant = _match_union_variant(pending_union[0], pending_union[1], name)
+            if variant is None:
+                break
+            current = variant
+            pending_union = None
+            continue
+        env_parts.append(name.upper())
+        # pydantic stores model_fields annotations with the Annotated wrapper
+        # stripped; the union discriminator lives on the FieldInfo itself.
+        annotation = field_info.annotation
+        discriminator = getattr(field_info, "discriminator", None)
+        if get_origin(annotation) in (Union, UnionType) and discriminator:
+            pending_union = (annotation, discriminator)
+            continue
+        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+            current = annotation
+
+    prefix = env_prefix + env_delim.join(env_parts)
+    if pending_union is not None and msg == "Field required":
+        # The whole discriminated union is absent: point at the discriminator
+        # env var so the user can pick a variant (its README-documented
+        # fields then follow).
+        return f"{prefix}{env_delim}{pending_union[1].upper()}"
+    if msg != "Field required" or len(loc) != 1 or current is TheseusSettings:
+        return prefix
+    required = [name for name, info in current.model_fields.items() if info.is_required()]
+    if not required:
+        return prefix
+    return ", ".join(f"{prefix}{env_delim}{name.upper()}" for name in required)
+
+
 def main() -> None:
-    """Run the MCP server over the portable stdio transport."""
-    create_mcp_server().run(transport="stdio")
+    """Run the MCP server over the portable stdio transport.
+
+    Loads settings from ``THESEUS_*`` environment variables or a local
+    ``.env`` file (pydantic-settings).  Missing or invalid configuration
+    fails fast with an actionable, redacted message on stderr instead of
+    silently serving an empty server (Issue #30).
+    """
+    try:
+        settings = TheseusSettings()
+    except ValidationError as exc:
+        print(_format_settings_errors(exc), file=sys.stderr)
+        raise SystemExit(2) from None
+    create_mcp_server(settings).run(transport="stdio")

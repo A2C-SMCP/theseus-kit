@@ -5,7 +5,7 @@ Runs the full real-process chain, no mocks on either side:
     Agent (a2c-smcp AsyncSMCPAgentClient)
       → signaling server (real Socket.IO + version handshake middleware)
         → Computer (a2c-smcp, real MCP stdio subprocess running the kit)
-          → theseus-kit (real create_mcp_server + stdio transport)
+          → theseus-kit (real production entry ``python -m theseus_kit``)
             → fake robot (tests._fakeserver, real TCP HTTP)
 
 Covers, through the official SDK:
@@ -26,12 +26,9 @@ Gated behind ``THESEUS_E2E=1`` like the robot e2e suite; run with::
 
     THESEUS_E2E=1 uv run pytest tests/e2e -v -m e2e
 
-Known acceptance findings (tracked for the debug phase, not fixed here):
-
-- ``main()`` (the ``theseus-kit`` console entry) builds the server WITHOUT
-  settings — zero tools and zero skill resources are served.  This suite
-  therefore launches ``tests/e2e/_kit_stdio_runner.py`` (settings from env)
-  instead of ``python -m theseus_kit``.
+The kit subprocess is launched through the real production entry
+(``python -m theseus_kit``), which loads its settings from the ``THESEUS_*``
+environment exported by the ``kit_env`` fixture (Issue #30).
 """
 
 from __future__ import annotations
