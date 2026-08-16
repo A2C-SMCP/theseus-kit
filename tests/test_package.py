@@ -21,13 +21,29 @@ def test_create_mcp_server_default() -> None:
 
 
 def test_main_uses_portable_stdio_transport(monkeypatch: pytest.MonkeyPatch) -> None:
-    """main() runs with transport='stdio'."""
+    """main() runs with transport='stdio' (settings from THESEUS_* env).
+
+    main() loads TheseusSettings() first (Issue #30) — env vars are set
+    explicitly so the test never depends on a repo-local ``.env`` (absent in
+    CI, present on developer machines).
+    """
     transports: list[str] = []
 
     def fake_run(self: FastMCP, *, transport: str) -> None:
         transports.append(transport)
 
     monkeypatch.setattr(FastMCP, "run", fake_run)
+    for name, value in {
+        "THESEUS_ROBOT__ROBOT_ID": "test-robot",
+        "THESEUS_ROBOT__NAMESPACE": "test-ns",
+        "THESEUS_ROBOT__ROBOT_TYPE": "tfrobot",
+        "THESEUS_ROBOT__API_BASE_URL": "https://localhost:1",
+        "THESEUS_ROBOT__MANAGER_BASE_URL": "https://localhost:1",
+        "THESEUS_CREDENTIAL__KIND": "user_pat",
+        "THESEUS_CREDENTIAL__PAT": "tfp_test_pat",
+        "THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID": "testorg:10001",
+    }.items():
+        monkeypatch.setenv(name, value)
     main()
     assert transports == ["stdio"]
 
