@@ -229,7 +229,7 @@ class RobotClient:
                 f"robot request to {path} failed before a response: {type(exc).__name__}",
                 status_code=0,
             ) from exc
-        return self._ensure_ok(path, response, required_scope="config:read")
+        return self._ensure_ok(path, response, scope_hint="config:read")
 
     async def get_draft_dict(self, setting_id: int) -> dict[str, Any]:
         """Fetch a draft DTO as a raw dict for hash comparison.
@@ -306,9 +306,13 @@ class RobotClient:
         json: Any = None,
         data: Any = None,
         files: Any = None,
-        required_scope: str = "config:write",
+        scope_hint: str = "config:write",
     ) -> httpx.Response:
-        """POST to *path*; no automatic retry (mutations are not idempotent)."""
+        """POST to *path*; no automatic retry (mutations are not idempotent).
+
+        ``scope_hint`` is used only in 403 error guidance.  The scopes requested
+        during PAT token exchange come from ``THESEUS_CREDENTIAL__SCOPES``.
+        """
         return await self._request(
             "POST",
             path,
@@ -316,7 +320,7 @@ class RobotClient:
             content=data,
             files=files,
             retry=False,
-            required_scope=required_scope,
+            scope_hint=scope_hint,
         )
 
     async def put(
@@ -325,21 +329,24 @@ class RobotClient:
         *,
         json: Any = None,
         data: Any = None,
-        required_scope: str = "config:write",
+        scope_hint: str = "config:write",
     ) -> httpx.Response:
-        """PUT to *path*; no automatic retry."""
+        """PUT to *path*; no automatic retry.
+
+        ``scope_hint`` affects only 403 error guidance, not token exchange.
+        """
         return await self._request(
             "PUT",
             path,
             json=json,
             content=data,
             retry=False,
-            required_scope=required_scope,
+            scope_hint=scope_hint,
         )
 
-    async def delete(self, path: str, *, required_scope: str = "config:write") -> httpx.Response:
-        """DELETE *path*; no automatic retry."""
-        return await self._request("DELETE", path, retry=False, required_scope=required_scope)
+    async def delete(self, path: str, *, scope_hint: str = "config:write") -> httpx.Response:
+        """DELETE *path* without retry; ``scope_hint`` only labels 403 errors."""
+        return await self._request("DELETE", path, retry=False, scope_hint=scope_hint)
 
     # -- internal -----------------------------------------------------------
 
@@ -349,7 +356,7 @@ class RobotClient:
         path: str,
         *,
         retry: bool = False,
-        required_scope: str | None = None,
+        scope_hint: str | None = None,
         **kwargs: Any,
     ) -> httpx.Response:
         """Issue an HTTP request, conditionally retrying on transient failures.
@@ -377,7 +384,7 @@ class RobotClient:
                 return self._ensure_ok(
                     path,
                     response,
-                    required_scope=(required_scope or ("config:read" if method == "GET" else "config:write")),
+                    scope_hint=(scope_hint or ("config:read" if method == "GET" else "config:write")),
                 )
             except (AuthRejectedError, RobotValidationError):
                 raise  # never retry auth / validation failures
@@ -410,7 +417,7 @@ class RobotClient:
         path: str,
         response: httpx.Response,
         *,
-        required_scope: str,
+        scope_hint: str,
     ) -> httpx.Response:
         # Defense-in-depth: a caller could misuse `path` (e.g. embed a token as a
         # query string). Scrub PAT/JWT-shaped values so they never reach error text.
@@ -420,7 +427,7 @@ class RobotClient:
         if response.status_code == 403:
             raise AuthRejectedError(
                 f"robot rejected {safe_path} (HTTP 403): 无权访问目标 Robot，"
-                f"或当前短 Token 缺少此操作所需 scope（{required_scope}）。"
+                f"或当前短 Token 缺少此操作所需 scope（{scope_hint}）。"
             )
         if response.status_code == 422:
             msg = RobotClient._extract_422_message(response)

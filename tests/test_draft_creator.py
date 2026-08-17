@@ -17,6 +17,7 @@ from pydantic import SecretStr
 from theseus_kit import (
     AuthRejectedError,
     CreateDraftResponse,
+    RobotApiError,
     RobotClient,
     RobotValidationError,
     UserPatConfig,
@@ -66,8 +67,8 @@ def _tfs(data: object) -> bytes:
 def _created_draft_dto(**overrides: object) -> dict[str, Any]:
     """Build a minimal created-draft DTO for FakeRobotServer responses."""
     d: dict[str, Any] = {
-        "setting_id": 42,
-        "setting_name": "my-llm",
+        "settingId": 42,
+        "settingName": "my-llm",
         "scene": "LLM",
         "factoryName": "GLM草稿",
         "config": {"model": "glm-4", "temperature": 0.7},
@@ -283,13 +284,12 @@ async def test_create_draft_content_hash_matches_compute(fake: FakeRobotServer) 
     assert result.content_hash == expected_hash
 
 
-# -- CamelCase field tolerance ---------------------------------------------
+# -- Response contract -----------------------------------------------------
 
 
-async def test_create_draft_tolerates_camelcase_setting_id(fake: FakeRobotServer) -> None:
-    """Response with settingId (camelCase) is parsed correctly."""
+async def test_create_draft_uses_camelcase_response_contract(fake: FakeRobotServer) -> None:
+    """The frozen rc5 camelCase response fields are parsed directly."""
     dto = _created_draft_dto()
-    dto.pop("setting_id", None)
     dto["settingId"] = 99
     fake.robot_responses[("POST", _CREATE_PATH)] = RobotResponse(200, _tfs(dto))
 
@@ -302,3 +302,19 @@ async def test_create_draft_tolerates_camelcase_setting_id(fake: FakeRobotServer
         )
 
     assert result.setting_id == 99
+
+
+async def test_create_draft_rejects_snake_case_response_alias(fake: FakeRobotServer) -> None:
+    """A snake_case-only response fails loudly instead of hiding contract drift."""
+    dto = _created_draft_dto()
+    dto["setting_id"] = dto.pop("settingId")
+    fake.robot_responses[("POST", _CREATE_PATH)] = RobotResponse(200, _tfs(dto))
+
+    async with _client(fake) as client:
+        with pytest.raises(RobotApiError, match=r"rc5 camelCase contract: missing data\.settingId"):
+            await _creator().create(
+                client,
+                scene="LLM",
+                factory_name="GLM草稿",
+                setting_name="x",
+            )

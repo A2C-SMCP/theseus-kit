@@ -18,6 +18,7 @@ from theseus_kit import (
     AuthRejectedError,
     DraftConflictError,
     DraftNotFoundError,
+    RobotApiError,
     RobotClient,
     RobotValidationError,
     UserPatConfig,
@@ -382,3 +383,19 @@ async def test_update_draft_preserves_scene_and_factory(fake: FakeRobotServer) -
     assert result.scene == "chat"
     assert result.setting_name == "llm-v2"
     assert result.revision == "3.0"
+
+
+async def test_update_draft_rejects_snake_case_response_alias(fake: FakeRobotServer) -> None:
+    """A snake_case-only setting name exposes rc5 response contract drift."""
+    updated = _draft_dto()
+    updated["setting_name"] = updated.pop("settingName")
+    fake.robot_responses[("PUT", "/v1/factory/drafts/1")] = RobotResponse(200, _tfs(updated))
+
+    async with _client(fake) as client:
+        with pytest.raises(RobotApiError, match=r"rc5 camelCase contract: missing data\.settingName"):
+            await _editor().update_draft(
+                client,
+                setting_id=1,
+                setting_name="renamed",
+                config={"key": "value"},
+            )

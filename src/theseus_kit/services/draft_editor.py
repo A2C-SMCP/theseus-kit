@@ -109,13 +109,21 @@ class DraftEditor:
 
         new_hash = compute_config_hash(updated_config)
 
+        try:
+            response_setting_name = data["settingName"]
+        except KeyError as exc:
+            raise RobotApiError(
+                "update draft response violated the rc5 camelCase contract: missing data.settingName",
+                status_code=code,
+            ) from exc
+
         return UpdateDraftResponse(
             locator=locator,
             setting_id=setting_id,
-            setting_name=data.get("setting_name", data.get("settingName", setting_name)),
+            setting_name=response_setting_name,
             scene=scene,
             config=updated_config,
             content_hash=new_hash,
-            revision=data.get("factory_version", data.get("factoryVersion")),
+            revision=data.get("factoryVersion"),
             **{"_meta": {"fetched_at": now}},
         )
