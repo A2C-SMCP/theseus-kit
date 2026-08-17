@@ -41,7 +41,7 @@ description: 阶段二——把已确认的机器人画像转换为结构化配�
    - 用户可提供**自研 Plugin / MCP**，纳入候选一并评估
    - 选型清单落工件 `configs/toolchain.yaml`（需求 → 选型 → 理由 → 来源）；**用户确认后才进计划文件**，未确认不写
 4. **其余配置转换**：岗位职责 / 工作范围 → 对应配置项的 YAML/JSON 工件（命名 `configs/<主题>.yaml`），字段形状以目标配置项为准
-5. **渐进披露调研**：当前真实配置通过 MCP 工具读取——先 `get_config_summary` 看拓扑，再 `list_config_nodes` / `get_config_detail` 展开**有必要编辑**的节点，`get_config_value` 取具体值。逐步展开，绝不整树读入
+5. **渐进披露调研**：当前真实配置通过 MCP 工具读取——先 `get_config_summary` 看拓扑，再 `list_config_nodes` 展开节点列表、`get_config_detail` 展开**有必要编辑**的节点取字段与具体值。逐步展开，绝不整树读入
 6. **复杂配置写脚本**：需要批量/结构化处理时写脚本（TFOnto 校验即先例）；脚本放工作区 `scripts/`、临时产物放 `tmp/`，执行前经用户确认，报错迭代放进宿主系统的隔离上下文（布局与隔离机制见 theseus 的 `references/workspace-layout.md` / `references/context-isolation.md`；A2C 的 `${TFROBOT_SKILL_DIR}` 只适用于技能包内脚本）
 7. **固化计划**：落盘前先查 plans/——已有未完成计划须先完成（或经用户确认强制完成），**不允许并行修改**；按 theseus 技能的 `references/plan-format.md` 规范格式产出 `plans/<YYYY-MM-DD>-<主题>-in-progress.md`，供阶段三逐条执行
 
