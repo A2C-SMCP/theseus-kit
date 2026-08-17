@@ -229,7 +229,7 @@ class RobotClient:
                 f"robot request to {path} failed before a response: {type(exc).__name__}",
                 status_code=0,
             ) from exc
-        return self._ensure_ok(path, response)
+        return self._ensure_ok(path, response, required_scope="config:read")
 
     async def get_draft_dict(self, setting_id: int) -> dict[str, Any]:
         """Fetch a draft DTO as a raw dict for hash comparison.
@@ -299,17 +299,47 @@ class RobotClient:
 
     # -- write endpoints (no retry) -----------------------------------------
 
-    async def post(self, path: str, *, json: Any = None, data: Any = None, files: Any = None) -> httpx.Response:
+    async def post(
+        self,
+        path: str,
+        *,
+        json: Any = None,
+        data: Any = None,
+        files: Any = None,
+        required_scope: str = "config:write",
+    ) -> httpx.Response:
         """POST to *path*; no automatic retry (mutations are not idempotent)."""
-        return await self._request("POST", path, json=json, content=data, files=files, retry=False)
+        return await self._request(
+            "POST",
+            path,
+            json=json,
+            content=data,
+            files=files,
+            retry=False,
+            required_scope=required_scope,
+        )
 
-    async def put(self, path: str, *, json: Any = None, data: Any = None) -> httpx.Response:
+    async def put(
+        self,
+        path: str,
+        *,
+        json: Any = None,
+        data: Any = None,
+        required_scope: str = "config:write",
+    ) -> httpx.Response:
         """PUT to *path*; no automatic retry."""
-        return await self._request("PUT", path, json=json, content=data, retry=False)
+        return await self._request(
+            "PUT",
+            path,
+            json=json,
+            content=data,
+            retry=False,
+            required_scope=required_scope,
+        )
 
-    async def delete(self, path: str) -> httpx.Response:
+    async def delete(self, path: str, *, required_scope: str = "config:write") -> httpx.Response:
         """DELETE *path*; no automatic retry."""
-        return await self._request("DELETE", path, retry=False)
+        return await self._request("DELETE", path, retry=False, required_scope=required_scope)
 
     # -- internal -----------------------------------------------------------
 
@@ -319,6 +349,7 @@ class RobotClient:
         path: str,
         *,
         retry: bool = False,
+        required_scope: str | None = None,
         **kwargs: Any,
     ) -> httpx.Response:
         """Issue an HTTP request, conditionally retrying on transient failures.
@@ -343,7 +374,11 @@ class RobotClient:
                 continue
 
             try:
-                return self._ensure_ok(path, response)
+                return self._ensure_ok(
+                    path,
+                    response,
+                    required_scope=(required_scope or ("config:read" if method == "GET" else "config:write")),
+                )
             except (AuthRejectedError, RobotValidationError):
                 raise  # never retry auth / validation failures
             except RobotApiError as exc:
@@ -371,14 +406,21 @@ class RobotClient:
         return (await self.get(doc_path)).text
 
     @staticmethod
-    def _ensure_ok(path: str, response: httpx.Response) -> httpx.Response:
+    def _ensure_ok(
+        path: str,
+        response: httpx.Response,
+        *,
+        required_scope: str,
+    ) -> httpx.Response:
         # Defense-in-depth: a caller could misuse `path` (e.g. embed a token as a
         # query string). Scrub PAT/JWT-shaped values so they never reach error text.
         safe_path = redact_secrets(path)
-        if response.status_code in (401, 403):
+        if response.status_code == 401:
+            raise AuthRejectedError(f"robot rejected {safe_path} (HTTP 401): 凭证无效、已过期或目标 Robot 不匹配。")
+        if response.status_code == 403:
             raise AuthRejectedError(
-                f"robot rejected {safe_path} (HTTP {response.status_code}): "
-                "凭证无效或 scope 不足（只读访问需 config:read）。"
+                f"robot rejected {safe_path} (HTTP 403): 无权访问目标 Robot，"
+                f"或当前短 Token 缺少此操作所需 scope（{required_scope}）。"
             )
         if response.status_code == 422:
             msg = RobotClient._extract_422_message(response)

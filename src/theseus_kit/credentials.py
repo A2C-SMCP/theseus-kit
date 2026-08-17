@@ -33,20 +33,23 @@ def _parse_public_id(public_id: str, *, field_name: str) -> tuple[str, str]:
 def build_credential(
     cred: CredentialConfig,
     *,
-    scopes: Sequence[Scope | str] = (Scope.CONFIG_READ,),
+    scopes: Sequence[Scope | str] | None = None,
 ) -> PatCredential:
     """Construct the tfrs-auth credential for the configured source.
 
     ``user_pat`` exchanges the user's PAT for a robot-scoped JWT via Manager's
     token-exchange endpoint (RFC 8693).  The token ``audience`` is
-    ``robot:{public_id}`` where *public_id* identifies the target robot.
+    ``robot:{public_id}`` where *public_id* identifies the target robot. By
+    default the configured theseus-kit scopes are requested, and Manager grants
+    their intersection with the PAT ceiling and the target Robot's
+    authorization. ``scopes`` is an optional explicit per-call override.
     """
     if isinstance(cred, UserPatConfig):
         org_slug, employee_no = _parse_public_id(cred.robot_public_id, field_name="robot_public_id")
         return PatCredential(
             pat=cred.pat.get_secret_value(),
             audience=robot_audience(org_slug, employee_no),
-            scope=scopes_to_str(scopes),
+            scope=cred.scopes if scopes is None else scopes_to_str(scopes),
         )
     if isinstance(cred, OAuthConfig):
         raise ConfigError(

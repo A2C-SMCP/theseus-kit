@@ -26,6 +26,8 @@ THESEUS_ROBOT__MANAGER_BASE_URL=https://manager.example.com
 THESEUS_CREDENTIAL__KIND=user_pat
 THESEUS_CREDENTIAL__PAT=tfp_xxxxxxxx
 THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID=myorg:12345
+# 可选；不设置时默认申请三个配置 scope，再与 PAT 和目标 Robot 权限求交
+THESEUS_CREDENTIAL__SCOPES=config:read config:write config:publish
 ```
 
 **OAuth 配置示例**（`.env` 或环境变量）：
@@ -158,7 +160,7 @@ STDIO 模式下 MCP Client 无 HTTP 能力，theseus-kit 需自驱授权：
 | `ConfigError`：「OAuth credentials bypass the token exchange pipeline」 | `[OAuth]` | PAT 路径代码收到了 OAuth 配置（防御性守卫） | 不需处理，OAuth 路径走 `StaticTokenSource` |
 | `ConfigError`：`authorization_server` 格式错误 | `[OAuth]` | URL 未以 `http://` 或 `https://` 开头 | 修正为完整 URL |
 | `AuthRejectedError`（401） | `[通用]` | Token 签名无效或过期 | 检查 AS 与 theseus-kit 时钟同步；重新登录 |
-| `AuthRejectedError`（403） | `[通用]` | Scope 不足 | 确认 `scopes` 配置包含所需权限（只读=`config:read`）|
+| `AuthRejectedError`（403） | `[通用]` | 无权访问目标 Robot，或短 Token Scope 不足 | 按错误中的 required scope 检查 PAT 权限；PAT 路径默认申请 theseus-kit 的三个配置 scope，并由 Manager 与 PAT/Robot 权限求交 |
 | `SubscriptionFrozenError`（402） | `[PAT]` | Manager 换发返回 402（组织订阅冻结） | 续费后重试 |
 | `ExchangeUnavailableError` | `[PAT]` | TFRSManager 换发端点不可达 | 检查网络连接 + `manager_base_url` 配置；稍后重试 |
 | OAuth 授权页面打不开 | `[OAuth]` | TFRSManager AS 不可达 | 确认 `authorization_server` URL 正确 |

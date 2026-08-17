@@ -18,6 +18,8 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_THESEUS_CONFIG_SCOPES = frozenset({"config:read", "config:write", "config:publish"})
+
 
 class RobotTarget(BaseModel):
     """One target robot's routing identity + endpoints + TLS.
@@ -65,6 +67,23 @@ class UserPatConfig(BaseModel):
         description="目标机器人 public_id（{orgSlug}:{employeeNo}）→ audience robot:{public_id}",
         pattern=r"^[a-z0-9-]+:[a-zA-Z0-9]+$",
     )
+    scopes: str = Field(
+        default="config:read config:write config:publish",
+        description=(
+            "空格分隔的配置 scope；默认申请 theseus-kit 的完整配置能力，Manager 最终按 PAT 权限上限与 Robot 授权求交。"
+        ),
+    )
+
+    @field_validator("scopes")
+    @classmethod
+    def _validate_scopes(cls, value: str) -> str:
+        scopes = list(dict.fromkeys(value.split()))
+        if not scopes:
+            raise ValueError("scopes must contain at least one config scope")
+        unsupported = sorted(set(scopes) - _THESEUS_CONFIG_SCOPES)
+        if unsupported:
+            raise ValueError(f"unsupported theseus-kit scopes: {', '.join(unsupported)}")
+        return " ".join(scopes)
 
 
 class OAuthConfig(BaseModel):
@@ -86,7 +105,7 @@ class OAuthConfig(BaseModel):
     )
     scopes: str = Field(
         default="config:read",
-        description="Space-separated scope string（与 PAT 路径默认值一致）",
+        description="Space-separated scope string（OAuth 默认只读；写入和发布需显式申请）",
     )
     client_id: str | None = Field(
         default=None,
@@ -149,6 +168,7 @@ class TheseusSettings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        hide_input_in_errors=True,
     )
 
     robot: RobotTarget

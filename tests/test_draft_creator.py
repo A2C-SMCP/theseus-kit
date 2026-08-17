@@ -145,8 +145,8 @@ async def test_create_draft_response_has_meta(fake: FakeRobotServer) -> None:
 # -- Request body validation -----------------------------------------------
 
 
-async def test_create_draft_sends_correct_payload(fake: FakeRobotServer) -> None:
-    """The POST body carries scene, factoryName, settingName, config."""
+async def test_create_draft_sends_robot_api_contract_payload(fake: FakeRobotServer) -> None:
+    """Creation uses the canonical route and DTO expected by TFRobotServer."""
     fake.robot_responses[("POST", _CREATE_PATH)] = RobotResponse(200, _tfs(_created_draft_dto()))
 
     async with _client(fake) as client:
@@ -168,13 +168,14 @@ async def test_create_draft_sends_correct_payload(fake: FakeRobotServer) -> None
     assert create_req is not None
     body = json.loads(create_req.body or "{}")
     assert body["scene"] == "LLM"
-    assert body["factoryName"] == "CLAUDE草稿"
+    assert body["name"] == "CLAUDE草稿"
     assert body["settingName"] == "claude-v1"
     assert body["config"] == {"key": "val"}
+    assert "factoryName" not in body
 
 
-async def test_create_draft_null_config_omitted(fake: FakeRobotServer) -> None:
-    """When config is None, it is not included in the payload."""
+async def test_create_draft_null_config_sends_empty_object(fake: FakeRobotServer) -> None:
+    """When config is None, the required Robot API field is an empty object."""
     fake.robot_responses[("POST", _CREATE_PATH)] = RobotResponse(200, _tfs(_created_draft_dto()))
 
     async with _client(fake) as client:
@@ -192,7 +193,7 @@ async def test_create_draft_null_config_omitted(fake: FakeRobotServer) -> None:
             break
     assert create_req is not None
     body = json.loads(create_req.body or "{}")
-    assert "config" not in body
+    assert body["config"] == {}
 
 
 # -- Error paths -----------------------------------------------------------

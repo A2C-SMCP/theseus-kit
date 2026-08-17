@@ -95,7 +95,7 @@ class ConfigPublisher:
 
         # 3. Publish — no body, no retry.
         now = datetime.now(UTC).isoformat()
-        response = await client.post(_RELEASE_PATH)
+        response = await client.post(_RELEASE_PATH, required_scope="config:publish")
         body: dict[str, Any] = response.json()
         code: int = body.get("code", 0)
 

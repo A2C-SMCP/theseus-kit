@@ -66,17 +66,17 @@ def _tfs(data: object) -> bytes:
 
 
 def _draft_dto(**overrides: object) -> dict[str, Any]:
-    """Build a minimal DraftFactorySettingDto dict for FakeRobotServer responses."""
+    """Build a minimal rc5 DraftFactorySettingDto HTTP response."""
     d: dict[str, Any] = {
-        "setting_id": 1,
-        "setting_name": "test-draft",
+        "settingId": 1,
+        "settingName": "test-draft",
         "scene": "brain",
         "name": "brain",
         "config": {"key": "original"},
-        "factory_version": "1.0",
-        "compatible_versions": [],
-        "config_schema": {},
-        "tfs_actions": {},
+        "factoryVersion": "1.0",
+        "compatibleVersions": [],
+        "configSchema": {},
+        "tfsActions": {},
     }
     d.update(overrides)
     return d
@@ -87,10 +87,14 @@ def _draft_dto(**overrides: object) -> dict[str, Any]:
 
 async def test_update_draft_success(fake: FakeRobotServer) -> None:
     """PUT succeeds, response carries correct locator, hash, and revision."""
-    draft = _draft_dto()
+    draft = _draft_dto(config={"kept": "value", "changed": "old"})
     fake.robot_responses["/v1/factory/drafts/1"] = RobotResponse(200, _tfs(draft))
-    # The PUT response returns the updated DTO with the new setting_name.
-    updated = _draft_dto(setting_name="renamed", config={"key": "updated"}, factory_version="2.0")
+    # The PUT response returns the updated DTO with the new settingName.
+    updated = _draft_dto(
+        settingName="renamed",
+        config={"kept": "value", "changed": "new"},
+        factoryVersion="2.0",
+    )
     fake.robot_responses[("PUT", "/v1/factory/drafts/1")] = RobotResponse(200, _tfs(updated))
 
     async with _client(fake) as client:
@@ -98,26 +102,30 @@ async def test_update_draft_success(fake: FakeRobotServer) -> None:
             client,
             setting_id=1,
             setting_name="renamed",
-            config={"key": "updated"},
+            config={"changed": "new"},
         )
 
     assert result.setting_id == 1
     assert result.setting_name == "renamed"
     assert result.scene == "brain"
     assert result.locator == "tcfg:draft/brain/brain/1"
-    assert result.config == {"key": "updated"}
+    assert result.config == {"kept": "value", "changed": "new"}
     assert result.revision == "2.0"
-    assert result.content_hash == compute_config_hash({"key": "updated"})
+    assert result.content_hash == compute_config_hash({"kept": "value", "changed": "new"})
     assert result.meta.fetched_at
     assert "T" in result.meta.fetched_at
 
-    # Verify PUT request body matches TFRobotServer contract.
+    # Verify the exact public TFRobotServer contract.  FastAPI's ``draftInfo``
+    # body alias must not leak into the JSON payload as a wrapper.
     put_requests = [r for r in fake.requests if r.method == "PUT"]
     assert len(put_requests) == 1
     put_body = json.loads(put_requests[0].body)
-    assert "draftInfo" in put_body
-    assert put_body["draftInfo"]["setting_name"] == "renamed"
-    assert put_body["draftInfo"]["config"] == {"key": "updated"}
+    assert put_body == {
+        "settingName": "renamed",
+        "config": {"changed": "new"},
+    }
+    assert "draftInfo" not in put_body
+    assert "setting_name" not in put_body
 
 
 async def test_update_draft_hash_match(fake: FakeRobotServer) -> None:
@@ -282,7 +290,7 @@ async def test_update_draft_403(fake: FakeRobotServer) -> None:
     fake.robot_responses[("PUT", "/v1/factory/drafts/1")] = RobotResponse(403, b"forbidden", "text/plain")
 
     async with _client(fake) as client:
-        with pytest.raises(AuthRejectedError):
+        with pytest.raises(AuthRejectedError, match="config:write"):
             await _editor().update_draft(
                 client,
                 setting_id=1,
@@ -340,7 +348,7 @@ async def test_update_draft_response_locator(fake: FakeRobotServer) -> None:
     draft = _draft_dto(scene="vision", name="detector")
     fake.robot_responses["/v1/factory/drafts/42"] = RobotResponse(200, _tfs(draft))
 
-    updated = _draft_dto(setting_id=42, scene="vision", name="detector")
+    updated = _draft_dto(settingId=42, scene="vision", name="detector")
     fake.robot_responses[("PUT", "/v1/factory/drafts/42")] = RobotResponse(200, _tfs(updated))
 
     async with _client(fake) as client:
@@ -360,7 +368,7 @@ async def test_update_draft_preserves_scene_and_factory(fake: FakeRobotServer) -
     draft = _draft_dto(scene="chat", name="llm")
     fake.robot_responses["/v1/factory/drafts/7"] = RobotResponse(200, _tfs(draft))
 
-    updated = _draft_dto(setting_id=7, scene="chat", name="llm", setting_name="llm-v2", factory_version="3.0")
+    updated = _draft_dto(settingId=7, scene="chat", name="llm", settingName="llm-v2", factoryVersion="3.0")
     fake.robot_responses[("PUT", "/v1/factory/drafts/7")] = RobotResponse(200, _tfs(updated))
 
     async with _client(fake) as client:

@@ -422,6 +422,8 @@ def _register_tools(mcp: FastMCP, settings: TheseusSettings) -> None:
             " since you read it, the call fails with a conflict error so you"
             " can re-read and retry.  Omit expected_hash to skip the conflict"
             " check (last-write-wins)."
+            " The config object is a partial update: include only fields that"
+            " should be merged into the existing draft config."
             " Returns the updated draft with a new content_hash for the next"
             " update.  This tool NEVER publishes the draft; it only modifies"
             " the stored configuration.  Requires config:write scope."

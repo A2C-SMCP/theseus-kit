@@ -101,10 +101,23 @@ async def test_exchange_wire_user_pat(fake_server: FakeRobotServer) -> None:
     assert form["subject_token"] == "tfp_test_pat"
     assert form["subject_token_type"] == "urn:ietf:params:oauth:token-type:access_token"
     assert form["audience"] == "robot:turingfocus:000042"
-    assert form["scope"] == "config:read"
+    assert form["scope"] == "config:read config:write config:publish"
     # The user's PAT is exchanged for a robot-scoped JWT; the PAT is sent
     # to the Manager over TLS. The redaction invariant is about logs/repr/
     # errors, not the wire — covered by the redaction tests below.
+
+
+async def test_exchange_wire_user_pat_uses_configured_scopes(fake_server: FakeRobotServer) -> None:
+    cred = UserPatConfig(
+        pat=SecretStr("tfp_test_pat"),
+        robot_public_id="turingfocus:000042",
+        scopes="config:read config:write",
+    )
+    async with _client(fake_server, cred=cred) as client:
+        await client.get_llms_txt()
+
+    form = parse_form(fake_server.token_posts()[0].body)
+    assert form["scope"] == "config:read config:write"
 
 
 async def test_robot_requests_carry_routing_headers(fake_server: FakeRobotServer) -> None:
@@ -354,7 +367,28 @@ def test_redact_no_false_positive_normal_text() -> None:
 def test_user_pat_builds_credential_with_correct_audience() -> None:
     cred = build_credential(UserPatConfig(pat=SecretStr("tfp_pat"), robot_public_id="turingfocus:000042"))
     assert cred.audience == "robot:turingfocus:000042"
-    assert cred.scope == "config:read"
+    assert cred.scope == "config:read config:write config:publish"
+
+
+def test_user_pat_builds_credential_with_configured_scopes() -> None:
+    cred = build_credential(
+        UserPatConfig(
+            pat=SecretStr("tfp_pat"),
+            robot_public_id="turingfocus:000042",
+            scopes="config:read config:write",
+        )
+    )
+    assert cred.scope == "config:read config:write"
+
+
+@pytest.mark.parametrize("scopes", ["", "chat:read", "config:read robot:admin"])
+def test_user_pat_rejects_empty_or_non_config_scopes(scopes: str) -> None:
+    with pytest.raises(ValidationError):
+        UserPatConfig(
+            pat=SecretStr("tfp_pat"),
+            robot_public_id="turingfocus:000042",
+            scopes=scopes,
+        )
 
 
 def test_settings_load_user_pat_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -367,6 +401,7 @@ def test_settings_load_user_pat_from_env(monkeypatch: pytest.MonkeyPatch) -> Non
         "THESEUS_CREDENTIAL__KIND": "user_pat",
         "THESEUS_CREDENTIAL__PAT": "tfp_test_pat",
         "THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID": "turingfocus:000042",
+        "THESEUS_CREDENTIAL__SCOPES": "config:read config:write",
     }
     for key in env:
         monkeypatch.delenv(key, raising=False)
@@ -374,6 +409,7 @@ def test_settings_load_user_pat_from_env(monkeypatch: pytest.MonkeyPatch) -> Non
         monkeypatch.setenv(k, v)
     settings = TheseusSettings()
     assert settings.credential.kind == "user_pat"
+    assert settings.credential.scopes == "config:read config:write"
     assert settings.robot.api_base_url == "https://api.example.com"
 
 
