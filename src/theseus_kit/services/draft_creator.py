@@ -56,11 +56,10 @@ class DraftCreator:
         """
         payload: dict[str, Any] = {
             "scene": scene,
-            "factoryName": factory_name,
+            "name": factory_name,
             "settingName": setting_name,
+            "config": config if config is not None else {},
         }
-        if config:
-            payload["config"] = config
 
         resp = await client.post(
             "/v1/factory/drafts",

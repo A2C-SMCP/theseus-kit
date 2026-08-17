@@ -47,6 +47,8 @@ export THESEUS_ROBOT__MANAGER_BASE_URL="https://manager.example.com"
 export THESEUS_CREDENTIAL__KIND="user_pat"
 export THESEUS_CREDENTIAL__PAT="tfp_xxx"
 export THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID="myorg:000042"
+# 可选：显式缩窄短 Token；不设置时默认申请以下三个配置 scope
+export THESEUS_CREDENTIAL__SCOPES="config:read config:write config:publish"
 
 # 方式 2：OAuth 2.0（MCP Client 驱动授权）
 export THESEUS_CREDENTIAL__KIND="oauth"
@@ -171,7 +173,8 @@ MCP Client → TFRSManager AS（Authorization Code + PKCE）
         "THESEUS_ROBOT__MANAGER_BASE_URL": "https://manager.example.com",
         "THESEUS_CREDENTIAL__KIND": "user_pat",
         "THESEUS_CREDENTIAL__PAT": "tfp_xxx",
-        "THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID": "myorg:000042"
+        "THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID": "myorg:000042",
+        "THESEUS_CREDENTIAL__SCOPES": "config:read config:write config:publish"
       }
     }
   }

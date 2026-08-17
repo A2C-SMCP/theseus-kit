@@ -52,7 +52,7 @@ class DraftEditor:
             client: An active ``RobotClient``.
             setting_id: The draft's setting ID (from the locator).
             setting_name: New human-readable name for the draft.
-            config: The complete replacement config dict (not a partial patch).
+            config: Config fields to merge into the existing draft config.
             expected_hash: Optional content hash from a prior
                 ``get_config_detail`` call.  When provided, the current
                 draft is read first and its config hash is compared —
@@ -80,7 +80,10 @@ class DraftEditor:
 
         # 2. PUT the update.
         now = datetime.now(UTC).isoformat()
-        put_body = {"draftInfo": {"setting_name": setting_name, "config": config}}
+        # TFRobotServer's PUT endpoint expects a flat JSON body whose public
+        # field names use camelCase.  ``draftInfo`` is the FastAPI body alias,
+        # not an additional JSON wrapper.
+        put_body = {"settingName": setting_name, "config": config}
         try:
             response = await client.put(path, json=put_body)
         except RobotApiError as exc:
@@ -109,10 +112,10 @@ class DraftEditor:
         return UpdateDraftResponse(
             locator=locator,
             setting_id=setting_id,
-            setting_name=data.get("setting_name", setting_name),
+            setting_name=data.get("setting_name", data.get("settingName", setting_name)),
             scene=scene,
             config=updated_config,
             content_hash=new_hash,
-            revision=data.get("factory_version"),
+            revision=data.get("factory_version", data.get("factoryVersion")),
             **{"_meta": {"fetched_at": now}},
         )
