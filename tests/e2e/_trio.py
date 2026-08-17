@@ -23,7 +23,6 @@ from a2c_smcp.computer.socketio.client import SMCPComputerClient
 from a2c_smcp.smcp import JOIN_OFFICE_EVENT, SMCP_NAMESPACE
 from mcp import StdioServerParameters
 
-KIT_RUNNER = Path(__file__).with_name("_kit_stdio_runner.py")
 KIT_BUNDLE_ID = "theseus-kit"  # auto-derived from StdioServerConfig name
 
 COMPUTER_NAME = "comp-e2e"
@@ -45,7 +44,7 @@ def stdio_kit_cfg() -> StdioServerConfig:
         name=KIT_BUNDLE_ID,
         server_parameters=StdioServerParameters(
             command=sys.executable,
-            args=[str(KIT_RUNNER)],
+            args=["-m", "theseus_kit"],  # the REAL production entry (Issue #30)
             env={k: v for k, v in os.environ.items()},
         ),
         default_tool_meta=ToolMeta(auto_apply=True),

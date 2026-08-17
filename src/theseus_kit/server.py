@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -10,9 +11,9 @@ from mcp.server.auth.provider import AccessToken
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import Annotations
-from pydantic import AnyHttpUrl, AnyUrl
+from pydantic import AnyHttpUrl, AnyUrl, ValidationError
 
-from .config import OAuthConfig, TheseusSettings
+from .config import OAuthConfig, TheseusSettings, format_settings_errors
 from .models import (
     ConfigDetail,
     ConfigSummary,
@@ -419,6 +420,8 @@ def _register_tools(mcp: FastMCP, settings: TheseusSettings) -> None:
             " since you read it, the call fails with a conflict error so you"
             " can re-read and retry.  Omit expected_hash to skip the conflict"
             " check (last-write-wins)."
+            " The config object is a partial update: include only fields that"
+            " should be merged into the existing draft config."
             " Returns the updated draft with a new content_hash for the next"
             " update.  This tool NEVER publishes the draft; it only modifies"
             " the stored configuration.  Requires config:write scope."
@@ -572,5 +575,16 @@ def _parse_space_separated(scopes: str) -> frozenset[str]:
 
 
 def main() -> None:
-    """Run the MCP server over the portable stdio transport."""
-    create_mcp_server().run(transport="stdio")
+    """Run the MCP server over the portable stdio transport.
+
+    Loads settings from ``THESEUS_*`` environment variables or a local
+    ``.env`` file (pydantic-settings).  Missing or invalid configuration
+    fails fast with an actionable, redacted message on stderr instead of
+    silently serving an empty server (Issue #30).
+    """
+    try:
+        settings = TheseusSettings()
+    except ValidationError as exc:
+        print(format_settings_errors(exc), file=sys.stderr)
+        raise SystemExit(2) from None
+    create_mcp_server(settings).run(transport="stdio")

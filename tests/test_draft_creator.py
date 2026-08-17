@@ -17,6 +17,7 @@ from pydantic import SecretStr
 from theseus_kit import (
     AuthRejectedError,
     CreateDraftResponse,
+    RobotApiError,
     RobotClient,
     RobotValidationError,
     UserPatConfig,
@@ -66,8 +67,8 @@ def _tfs(data: object) -> bytes:
 def _created_draft_dto(**overrides: object) -> dict[str, Any]:
     """Build a minimal created-draft DTO for FakeRobotServer responses."""
     d: dict[str, Any] = {
-        "setting_id": 42,
-        "setting_name": "my-llm",
+        "settingId": 42,
+        "settingName": "my-llm",
         "scene": "LLM",
         "factoryName": "GLM草稿",
         "config": {"model": "glm-4", "temperature": 0.7},
@@ -145,8 +146,8 @@ async def test_create_draft_response_has_meta(fake: FakeRobotServer) -> None:
 # -- Request body validation -----------------------------------------------
 
 
-async def test_create_draft_sends_correct_payload(fake: FakeRobotServer) -> None:
-    """The POST body carries scene, factoryName, settingName, config."""
+async def test_create_draft_sends_robot_api_contract_payload(fake: FakeRobotServer) -> None:
+    """Creation uses the canonical route and DTO expected by TFRobotServer."""
     fake.robot_responses[("POST", _CREATE_PATH)] = RobotResponse(200, _tfs(_created_draft_dto()))
 
     async with _client(fake) as client:
@@ -168,13 +169,14 @@ async def test_create_draft_sends_correct_payload(fake: FakeRobotServer) -> None
     assert create_req is not None
     body = json.loads(create_req.body or "{}")
     assert body["scene"] == "LLM"
-    assert body["factoryName"] == "CLAUDE草稿"
+    assert body["name"] == "CLAUDE草稿"
     assert body["settingName"] == "claude-v1"
     assert body["config"] == {"key": "val"}
+    assert "factoryName" not in body
 
 
-async def test_create_draft_null_config_omitted(fake: FakeRobotServer) -> None:
-    """When config is None, it is not included in the payload."""
+async def test_create_draft_null_config_sends_empty_object(fake: FakeRobotServer) -> None:
+    """When config is None, the required Robot API field is an empty object."""
     fake.robot_responses[("POST", _CREATE_PATH)] = RobotResponse(200, _tfs(_created_draft_dto()))
 
     async with _client(fake) as client:
@@ -192,7 +194,7 @@ async def test_create_draft_null_config_omitted(fake: FakeRobotServer) -> None:
             break
     assert create_req is not None
     body = json.loads(create_req.body or "{}")
-    assert "config" not in body
+    assert body["config"] == {}
 
 
 # -- Error paths -----------------------------------------------------------
@@ -282,13 +284,12 @@ async def test_create_draft_content_hash_matches_compute(fake: FakeRobotServer) 
     assert result.content_hash == expected_hash
 
 
-# -- CamelCase field tolerance ---------------------------------------------
+# -- Response contract -----------------------------------------------------
 
 
-async def test_create_draft_tolerates_camelcase_setting_id(fake: FakeRobotServer) -> None:
-    """Response with settingId (camelCase) is parsed correctly."""
+async def test_create_draft_uses_camelcase_response_contract(fake: FakeRobotServer) -> None:
+    """The frozen rc5 camelCase response fields are parsed directly."""
     dto = _created_draft_dto()
-    dto.pop("setting_id", None)
     dto["settingId"] = 99
     fake.robot_responses[("POST", _CREATE_PATH)] = RobotResponse(200, _tfs(dto))
 
@@ -301,3 +302,19 @@ async def test_create_draft_tolerates_camelcase_setting_id(fake: FakeRobotServer
         )
 
     assert result.setting_id == 99
+
+
+async def test_create_draft_rejects_snake_case_response_alias(fake: FakeRobotServer) -> None:
+    """A snake_case-only response fails loudly instead of hiding contract drift."""
+    dto = _created_draft_dto()
+    dto["setting_id"] = dto.pop("settingId")
+    fake.robot_responses[("POST", _CREATE_PATH)] = RobotResponse(200, _tfs(dto))
+
+    async with _client(fake) as client:
+        with pytest.raises(RobotApiError, match=r"rc5 camelCase contract: missing data\.settingId"):
+            await _creator().create(
+                client,
+                scene="LLM",
+                factory_name="GLM草稿",
+                setting_name="x",
+            )

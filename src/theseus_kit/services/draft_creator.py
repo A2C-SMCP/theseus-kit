@@ -56,11 +56,10 @@ class DraftCreator:
         """
         payload: dict[str, Any] = {
             "scene": scene,
-            "factoryName": factory_name,
+            "name": factory_name,
             "settingName": setting_name,
+            "config": config if config is not None else {},
         }
-        if config:
-            payload["config"] = config
 
         resp = await client.post(
             "/v1/factory/drafts",
@@ -82,12 +81,22 @@ class DraftCreator:
         content_hash = compute_config_hash(response_config)
         now = datetime.now(UTC).isoformat()
 
+        try:
+            setting_id = data["settingId"]
+            response_setting_name = data["settingName"]
+        except KeyError as exc:
+            missing = str(exc.args[0])
+            raise RobotApiError(
+                f"create draft response violated the rc5 camelCase contract: missing data.{missing}",
+                status_code=code,
+            ) from exc
+
         return CreateDraftResponse(
-            setting_id=data.get("setting_id", data.get("settingId", 0)),
-            setting_name=data.get("setting_name", data.get("settingName", "")),
+            setting_id=setting_id,
+            setting_name=response_setting_name,
             scene=data.get("scene", ""),
             config=response_config,
             content_hash=content_hash,
-            revision=data.get("factory_version", data.get("factoryVersion")),
+            revision=data.get("factoryVersion"),
             **{"_meta": ResponseMeta(fetched_at=now)},
         )

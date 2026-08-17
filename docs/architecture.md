@@ -112,6 +112,12 @@ is active at a time — the discriminated union prevents co-existence. See
 
 - Credentials stay in the MCP server process and never enter tool output,
   resources, logs, or SKILL content.
+- The two credential paths intentionally use different defaults: ``user_pat``
+  requests all three configuration scopes so the kit can expose its complete
+  lifecycle surface, while TFRSManager intersects that request with the PAT and
+  target Robot permission ceilings; OAuth defaults to least-privilege
+  ``config:read`` and requires explicit write/publish consent.  Code must not
+  treat a per-request error ``scope_hint`` as a token-exchange scope request.
 - Read, write, and publish capabilities remain distinct and map to the robot's
   `config:read`, `config:write`, and `config:publish` scopes.
 - Mutation tools return the affected object and revision evidence where the
@@ -123,4 +129,3 @@ is active at a time — the discriminated union prevents co-existence. See
   online states with an 8 KiB default / 32 KiB hard-cap budget. See
   [progressive-disclosure.md](progressive-disclosure.md) for the canonical
   spec that the read tools and `window://` resources implement.
-

@@ -1008,3 +1008,30 @@ def test_build_skill_resource_unknown_sub_resource() -> None:
 
     with pytest.raises(ValueError, match="Unknown sub-resource"):
         build_skill_resource("tune-config", "references/nonexistent.md")
+
+
+def test_package_skill_walk_skips_runtime_artifacts(tmp_path: Path) -> None:
+    """__pycache__ and dotfiles are never skill content.
+
+    Regression for the wheel-install crash: pip byte-compiles every ``.py``
+    at install time, so an installed skill package carries a
+    ``__pycache__/…pyc`` that a source checkout never has — the content walk
+    must not try to read it as UTF-8.
+    """
+    from theseus_kit.skills._registry import _iter_content_files
+
+    (tmp_path / "SKILL.md").write_text("# S\n", encoding="utf-8")
+    (tmp_path / "references").mkdir()
+    (tmp_path / "references" / "a.md").write_text("a\n", encoding="utf-8")
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "run.py").write_text("print(1)\n", encoding="utf-8")
+    pycache = tmp_path / "__pycache__"
+    pycache.mkdir()
+    (pycache / "fake.cpython-311.pyc").write_bytes(b"\xa7\x0d\x0d\x0a" + b"\x00" * 12)
+    (tmp_path / ".DS_Store").write_bytes(b"\x00\x01\x02")
+    (tmp_path / ".hidden_dir").mkdir()
+    (tmp_path / ".hidden_dir" / "x.md").write_text("x\n", encoding="utf-8")
+
+    rel_paths = {p.relative_to(tmp_path).as_posix() for p in _iter_content_files(tmp_path)}
+
+    assert rel_paths == {"SKILL.md", "references/a.md", "scripts/run.py"}

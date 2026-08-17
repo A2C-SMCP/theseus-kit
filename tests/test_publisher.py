@@ -218,7 +218,7 @@ async def test_publish_403(fake: FakeRobotServer) -> None:
     fake.robot_responses[("POST", "/v1/factory/drafts/release")] = RobotResponse(403, b"forbidden", "text/plain")
 
     async with _client(fake) as client:
-        with pytest.raises(AuthRejectedError):
+        with pytest.raises(AuthRejectedError, match="config:publish"):
             await _publisher().publish_config(
                 client,
                 expected_root_hash=_scenes_hash(["brain"]),
