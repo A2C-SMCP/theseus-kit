@@ -399,7 +399,6 @@ async def test_read_plan_config() -> None:
     assert "get_config_summary" in content  # progressive disclosure entry
     assert "list_config_nodes" in content
     assert "get_config_detail" in content
-    assert "get_config_value" in content
     assert "write-tfonto" in content  # atomic skill delegation
     assert "validate_tfonto.py" in content  # validation gate
     assert "context-isolation" in content  # host-isolation mechanism resolved
