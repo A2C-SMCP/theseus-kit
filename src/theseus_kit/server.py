@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import sys
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
@@ -10,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from mcp.server.auth.provider import AccessToken
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.session import ServerSession
 from mcp.types import Annotations
 from pydantic import AnyHttpUrl, AnyUrl, ValidationError
 
@@ -26,6 +28,7 @@ from .models import (
     TemplateResponse,
     UpdateDraftResponse,
 )
+from .subscriptions import DesktopFastMCP
 
 if TYPE_CHECKING:
     from .oauth import TheseusTokenVerifier
@@ -36,11 +39,12 @@ _INSTRUCTIONS = (
 )
 
 _WINDOW_NS = "window://com.a2c-smcp.theseus-kit"
+logger = logging.getLogger(__name__)
 _SKILL_NS = "skill://com.a2c-smcp.theseus-kit"
 
 
 def _register_resources(mcp: FastMCP, settings: TheseusSettings) -> None:
-    from .resources import build_recent, build_summary
+    from .resources import build_recent, build_summary, build_topology
     from .transport import RobotClient
 
     robot_id = settings.robot.robot_id
@@ -66,6 +70,17 @@ def _register_resources(mcp: FastMCP, settings: TheseusSettings) -> None:
     async def config_recent_detail() -> dict[str, Any]:
         async with RobotClient.from_settings(settings) as client:
             return await build_recent(client, robot_id)
+
+    @mcp.resource(
+        f"{_WINDOW_NS}/config/topology",
+        name="Config Draft Topology",
+        description="Reference graph of the draft configuration: roots, orphans, and an adjacency-list node map.",
+        mime_type="application/json",
+        annotations=Annotations(audience=["assistant"], priority=0.7),
+    )
+    async def config_topology() -> dict[str, Any]:
+        async with RobotClient.from_settings(settings) as client:
+            return await build_topology(client, robot_id)
 
 
 def _make_skill_reader(skill_name: str, rel_path: str) -> Callable[[], str]:
@@ -165,7 +180,7 @@ def _register_skill_sub_resource(mcp: FastMCP, skill_name: str, rel_path: str) -
     )(_make_skill_reader(skill_name, rel_path))
 
 
-def create_mcp_server(settings: TheseusSettings | None = None) -> FastMCP:
+def create_mcp_server(settings: TheseusSettings | None = None) -> DesktopFastMCP:
     """Build the FastMCP instance, conditionally configured for OAuth.
 
     When *settings* carries an ``oauth`` credential, the server is wired with
@@ -193,14 +208,14 @@ def create_mcp_server(settings: TheseusSettings | None = None) -> FastMCP:
             audience=resource_url,
         )
 
-        mcp = FastMCP(
+        mcp = DesktopFastMCP(
             name="theseus-kit",
             instructions=_INSTRUCTIONS,
             token_verifier=verifier,
             auth=auth,
         )
     else:
-        mcp = FastMCP(name="theseus-kit", instructions=_INSTRUCTIONS)
+        mcp = DesktopFastMCP(name="theseus-kit", instructions=_INSTRUCTIONS)
 
     if settings is not None:
         _register_tools(mcp, settings)
@@ -213,22 +228,42 @@ def create_mcp_server(settings: TheseusSettings | None = None) -> FastMCP:
 # -- Resource notification --------------------------------------------------
 
 
-def _notify(ctx: Context[Any, Any, Any] | None, resource: str) -> None:
-    """Best-effort resource-updated notification.
+async def _notify(ctx: Context[Any, Any, Any] | None, resource: str) -> None:
+    """Best-effort ``notifications/resources/updated`` for a window resource.
 
-    When *ctx* is available (tool was called through an MCP session), send a
-    ``notifications/resources/updated`` for the given *resource* (one of
-    ``"summary"`` or ``"recent"``).  Silently skips when no session context
-    is available (e.g. in tests that call tool functions directly).
+    Delivers to every session subscribed to the window URI (A2C-SMCP Desktop
+    subscription) plus the session that invoked the tool (deduped by session
+    identity).  Silently skips when no session context is available (e.g. in
+    tests that call tool functions directly).
+
+    ``ctx.fastmcp`` / ``ctx.request_context`` are properties that raise
+    ``ValueError`` when unset — guarded accordingly.
     """
     if ctx is None:
         return
     try:
-        uri = AnyUrl(f"{_WINDOW_NS}/config/{resource}")
-        ctx.request_context.session.send_resource_updated(uri)
+        uri_key = f"{_WINDOW_NS}/config/{resource}"
+        uri = AnyUrl(uri_key)
+
+        sessions: list[ServerSession] = []
+        fastmcp = ctx.fastmcp
+        if isinstance(fastmcp, DesktopFastMCP):
+            sessions.extend(fastmcp.subscription_registry.sessions_for(uri_key))
+        try:
+            sessions.append(ctx.request_context.session)
+        except ValueError:
+            # No session (direct tool call) — subscribers only, if any.
+            pass
+
+        unique = list(dict.fromkeys(sessions))  # ServerSession uses identity eq/hash
+        await asyncio.gather(
+            *(s.send_resource_updated(uri) for s in unique),
+            return_exceptions=True,
+        )
     except Exception:
-        # Never let a notification failure surface as a tool error.
-        pass
+        # Never let a notification failure surface as a tool error — but
+        # keep it observable at DEBUG level (stderr-safe under stdio).
+        logger.debug("resource notification failed for %s", resource, exc_info=True)
 
 
 # -- Tool registration -----------------------------------------------------
@@ -313,6 +348,7 @@ def _register_tools(mcp: FastMCP, settings: TheseusSettings) -> None:
         select: str = "",
         depth: int = 3,
         max_bytes: int = 8192,
+        ctx: Context[Any, Any, Any] | None = None,
     ) -> ConfigDetail:
         from .resources import set_last_locator
 
@@ -325,7 +361,10 @@ def _register_tools(mcp: FastMCP, settings: TheseusSettings) -> None:
                 depth=depth,
                 max_bytes=max_bytes,
             )
+        # Notify AFTER the locator is set: a client that re-reads `recent`
+        # on notification must see the new locator.
         set_last_locator(locator)
+        await _notify(ctx, "recent")
         return result
 
     @mcp.tool(
@@ -407,7 +446,8 @@ def _register_tools(mcp: FastMCP, settings: TheseusSettings) -> None:
                 setting_name=setting_name,
                 config=config,
             )
-        _notify(ctx, "summary")
+        await _notify(ctx, "summary")
+        await _notify(ctx, "topology")
         return result
 
     @mcp.tool(
@@ -443,9 +483,11 @@ def _register_tools(mcp: FastMCP, settings: TheseusSettings) -> None:
                 config=config,
                 expected_hash=expected_hash,
             )
-        # Resource notification: summary (draft revision changed) + recent (stale).
-        _notify(ctx, "summary")
-        _notify(ctx, "recent")
+        # Resource notification: summary (draft revision changed) + recent
+        # (stale).  Topology is conservative: reference fields can change here.
+        await _notify(ctx, "summary")
+        await _notify(ctx, "recent")
+        await _notify(ctx, "topology")
         return result
 
     @mcp.tool(
@@ -474,9 +516,10 @@ def _register_tools(mcp: FastMCP, settings: TheseusSettings) -> None:
                 expected_root_hash=expected_root_hash,
                 acknowledge_publish=acknowledge_publish,
             )
-        # Resource notification: both summary and recent are affected.
-        _notify(ctx, "summary")
-        _notify(ctx, "recent")
+        # Resource notification: summary, recent, and draft topology are all affected.
+        await _notify(ctx, "summary")
+        await _notify(ctx, "recent")
+        await _notify(ctx, "topology")
         return result
 
     @mcp.tool(
@@ -508,7 +551,7 @@ def _register_tools(mcp: FastMCP, settings: TheseusSettings) -> None:
                 expected_hash=expected_hash,
             )
         # Resource notification: summary (template count changed).
-        _notify(ctx, "summary")
+        await _notify(ctx, "summary")
         return result
 
     @mcp.tool(
