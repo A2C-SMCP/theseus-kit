@@ -367,6 +367,25 @@ class UpdateDraftResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+# -- delete_draft -------------------------------------------------------------
+
+
+class DeleteDraftResponse(BaseModel):
+    """``delete_draft`` response — confirmation of a draft node deletion.
+
+    The robot endpoint returns an empty data payload (``{}``), so the
+    response carries only the deletion confirmation and the echo of
+    *setting_id*.  *deleted* is a constant confirmation field (always
+    ``True`` — errors raise instead of returning here).
+    """
+
+    deleted: bool = True
+    setting_id: int = 0
+    meta: ResponseMeta = Field(alias="_meta")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 # -- publish_config -----------------------------------------------------------
 
 

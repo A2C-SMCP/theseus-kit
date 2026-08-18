@@ -20,6 +20,7 @@ from .models import (
     ConfigDetail,
     ConfigSummary,
     CreateDraftResponse,
+    DeleteDraftResponse,
     DraftValidateResponse,
     ListNodesResponse,
     LlmsDoc,
@@ -273,6 +274,7 @@ def _register_tools(mcp: FastMCP, settings: TheseusSettings) -> None:
     """Register the four progressive-disclosure read tools on *mcp*."""
     from .services.config_reader import ConfigReader
     from .services.draft_creator import DraftCreator
+    from .services.draft_deleter import DraftDeleter
     from .services.draft_editor import DraftEditor
     from .services.draft_validator import DraftValidator
     from .services.llms_doc_reader import LlmsDocReader
@@ -488,6 +490,30 @@ def _register_tools(mcp: FastMCP, settings: TheseusSettings) -> None:
         await _notify(ctx, "summary")
         await _notify(ctx, "recent")
         await _notify(ctx, "topology")
+        return result
+
+    @mcp.tool(
+        name="delete_draft",
+        description=(
+            "Delete a draft configuration node by setting_id."
+            " The robot removes inbound references from other drafts"
+            " automatically (no dangling references).  After deletion,"
+            " re-read get_config_summary to verify the node is gone; any"
+            " previously viewed detail may now be out of date."
+            " Requires config:write scope."
+        ),
+    )
+    async def delete_draft(
+        setting_id: int,
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> DeleteDraftResponse:
+        deleter = DraftDeleter(robot_id=robot_id)
+        async with RobotClient.from_settings(settings) as client:
+            result = await deleter.delete_draft(client, setting_id=setting_id)
+        # Resource notification: summary + topology (graph changed) + recent (stale).
+        await _notify(ctx, "summary")
+        await _notify(ctx, "topology")
+        await _notify(ctx, "recent")
         return result
 
     @mcp.tool(
