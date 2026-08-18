@@ -58,7 +58,7 @@ export THESEUS_CREDENTIAL__SCOPES="config:read config:write"
 
 ## MCP 工具
 
-theseus-kit 提供 **9 个 MCP 工具**，覆盖配置的完整生命周期：
+theseus-kit 提供 **11 个 MCP 工具**，覆盖配置的完整生命周期：
 
 ### 只读工具
 
@@ -74,7 +74,9 @@ theseus-kit 提供 **9 个 MCP 工具**，覆盖配置的完整生命周期：
 
 | 工具 | 说明 | 所需 Scope |
 |------|------|------------|
+| `create_draft` | 在指定 Scene 下用指定 Factory 创建新草稿节点 | `config:write` |
 | `update_draft` | 更新草稿配置项，支持 `expected_hash` 乐观并发控制 | `config:write` |
+| `delete_draft` | 删除草稿节点（服务端自动级联清理其它草稿对它的引用） | `config:write` |
 | `validate_draft` | 验证草稿配置是否满足上线条件（全量预检或指定节点），返回逐节点校验结果 | `config:write` |
 | `save_template` | 将草稿子树保存为可复用模板 | `config:write` |
 | `publish_config` | 将所有草稿发布到线上，要求 `acknowledge_publish=true` 显式确认 | `config:publish` |
@@ -212,7 +214,7 @@ OAuth 模式下的配置：
 ```
 ┌──────────────────────────────────────────┐
 │  MCP 表面层（server.py）                  │
-│  FastMCP · 9 工具 · 3 window:// 资源      │
+│  FastMCP · 11 工具 · 3 window:// 资源     │
 │  3 skill:// 资源 · OAuth PRM 路由         │
 ├──────────────────────────────────────────┤
 │  应用服务层（services/）                   │

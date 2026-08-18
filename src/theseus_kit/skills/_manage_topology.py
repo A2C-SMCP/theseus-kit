@@ -28,7 +28,7 @@ description: 管理 TFRobot 配置拓扑结构 —— 新建节点、删除节�
 | 操作 | 工具 | 说明 |
 |------|------|------|
 | 新建节点 | `create_draft` | 在指定 Scene 下用指定 Factory 创建新节点 |
-| 删除节点 | REST `DELETE /v1/factory/drafts/delete` | 移除不再需要的节点 |
+| 删除节点 | `delete_draft` | 移除不再需要的节点 |
 | 修改引用 | `update_draft`（只改 `*_setting_id` 字段） | 改变节点之间的连接关系 |
 
 > **与 `tune-config` 的分工**：改引用字段（谁指向谁）→ 本技能；改值字段（temperature、model、max_tokens 等参数）→ `tune-config`。
@@ -72,13 +72,14 @@ create_draft(
 
 ### 删除节点
 
-删除前**必须**做三项检查：
+删除前**必须**做两项检查：
 
 1. **确认内容**：`get_config_detail(locator=...)` 确认要删的是什么
-2. **检查被引用**：通过 topology（`get_config_summary` 内部已整合）确认没有其他节点引用此节点——否则会产生 dangling reference
-3. **用户确认**：向用户明确展示要删除的节点信息，获得确认后再执行
+2. **用户确认**：向用户明确展示要删除的节点信息，获得确认后再执行
 
-删除通过 `POST /v1/factory/drafts/delete` 完成，删除后调用 `get_config_summary` 验证。
+> 引用安全由机器人服务端保证：`delete_draft` 删除节点时**自动级联清理其它草稿对它的引用**，不会产生 dangling reference——无需在删除前手动检查被引用关系。
+
+删除通过 `delete_draft(setting_id=<要删的节点 ID>)` 完成，删除后调用 `get_config_summary` 验证。
 
 ### 修改引用关系
 
@@ -109,7 +110,7 @@ create_draft(
 
 - **先读 LLMTEXT 再决定 Factory**——不要凭记忆猜 Factory 名和能力。
 - **区分结构和参数**——引用字段（拓扑）在本技能处理，值字段（参数）在 `tune-config` 处理。
-- **删除前必须检查引用**——topology 确认无 dangling reference。
+- **删除前必须确认内容并获用户确认**——引用清理由机器人服务端级联完成。
 - **Factory 名区分大小写**——LLMTEXT 中显示什么就用什么。
 """,
         "references/factory-selection.md": """# Factory 选型指南

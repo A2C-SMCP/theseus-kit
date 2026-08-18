@@ -305,6 +305,35 @@ async def test_create_draft_notifies_summary_and_topology(fake: FakeRobotServer)
     assert captured == [_SUMMARY_URI, _TOPOLOGY_URI]
 
 
+async def test_delete_draft_notifies_summary_topology_recent(fake: FakeRobotServer) -> None:
+    """A mutation tool fires the mapped notifications: delete_draft →
+    summary + topology + recent."""
+    fake.robot_responses[("DELETE", "/v1/factory/drafts/42")] = RobotResponse(200, _tfs({}))
+    mcp = create_mcp_server(_settings(fake))
+
+    captured: list[str] = []
+    updated = asyncio.Event()
+
+    async with create_connected_server_and_client_session(
+        mcp,
+        message_handler=_make_message_handler(captured, updated),
+    ) as client:
+        await client.subscribe_resource(AnyUrl(_SUMMARY_URI))
+        await client.subscribe_resource(AnyUrl(_TOPOLOGY_URI))
+        await client.subscribe_resource(AnyUrl(_RECENT_URI))
+
+        await client.call_tool("delete_draft", {"setting_id": 42})
+
+        # All notifications are written before call_tool resolves; the
+        # client-side pump delivers them asynchronously — poll with a budget.
+        for _ in range(200):
+            if len(captured) >= 3:
+                break
+            await asyncio.sleep(0.01)
+
+    assert captured == [_SUMMARY_URI, _TOPOLOGY_URI, _RECENT_URI]
+
+
 async def test_unsubscribe_stops_delivery(fake: FakeRobotServer) -> None:
     """After unsubscribe, a session-less tool call notifies nobody."""
     _seed_draft_detail(fake)
