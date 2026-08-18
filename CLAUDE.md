@@ -70,7 +70,7 @@ uv run poe ci && uv run poe build && uv run poe package-check
 1. **MCP 表面层**（`server.py`）— FastMCP 实例，工具/资源声明
 2. **应用服务层**（尚未实现）— 读、编辑、保存模板、发布用例
 3. **TFRobot 客户端**（`transport.py`、`routing.py`、`tokens.py`、`credentials.py`）— 认证 HTTP 适配器，对接 `/v1/factory/**` 和 `/llms.txt`
-4. **资源投影层** — `window://` 实时快照（`resources.py`）与 `skill://` 技能指南（`skills/`，12 个类别，三层结构）：`theseus` 总纲调度 → 阶段技能 `persona-interview` / `persona-optimize` / `plan-config` / `apply-config-plan` → 原子技能 `analyze-config` / `manage-topology` / `tune-config` / `save-template` / `publish-config` / `write-tfonto`，外加反馈闭环技能 `enhance`。阶段交接物在机器人工作区 `~/.theseus/workspaces/<slug>/`（画像 `<slug>.md` + `configs/` + `plans/`）
+4. **资源投影层** — `window://` 实时快照（`resources.py`，三个窗口 summary/recent/topology + 订阅能力 `subscriptions.py`）与 `skill://` 技能指南（`skills/`，12 个类别，三层结构）：`theseus` 总纲调度 → 阶段技能 `persona-interview` / `persona-optimize` / `plan-config` / `apply-config-plan` → 原子技能 `analyze-config` / `manage-topology` / `tune-config` / `save-template` / `publish-config` / `write-tfonto`，外加反馈闭环技能 `enhance`。阶段交接物在机器人工作区 `~/.theseus/workspaces/<slug>/`（画像 `<slug>.md` + `configs/` + `plans/`）
 
 ### 认证与路由（第 3 层，#17 已交付）
 
@@ -93,6 +93,7 @@ uv run poe ci && uv run poe build && uv run poe package-check
 | `tokens.py` | `build_token_source()` — 组装 `AsyncCachingTokenSource`，Manager 换发端点固定 `/api/v1/oauth/token` |
 | `credentials.py` | `build_credential()` — 从 theseus-kit 配置构造 `tfrs_auth` 的 `PatCredential`，通过 token-exchange 换发 robot-scoped JWT |
 | `errors.py` | `TheseusError` 异常层级：`ConfigError` → `RoutingConfigError`、`CredentialError`、`ScopeOrAudienceError`、`ExchangeUnavailableError`（含 `retryable`）、`AuthRejectedError`、`SubscriptionFrozenError`（含 `renew_url`）、`RobotApiError`。`map_exchange_error()` 将 `tfrs_auth` 的异常映射为 theseus-kit 类型化错误 |
+| `subscriptions.py` | A2C-SMCP Desktop 订阅支持：`DesktopFastMCP` 子类声明 `resources.subscribe` 能力（mcp SDK <2.0 硬编码 False）+ `SubscriptionRegistry`（弱键会话→URI 订阅表）+ 永不抛异常的 Subscribe/Unsubscribe 处理器 |
 | `redaction.py` | 安全最后防线：用正则清除 PAT（`tfp_*`）和 JWT 形式的令牌，防止泄露到日志/错误消息 |
 | `__init__.py` | 公共 API 导出，`__version__` 由 bump-my-version 管理 |
 

@@ -108,6 +108,28 @@ See [`docs/upstream/tfrs-auth-oauth-feature-request.md`](upstream/tfrs-auth-oaut
 is active at a time — the discriminated union prevents co-existence. See
 [`docs/oauth-operations.md`](oauth-operations.md) for the user-facing guide.
 
+## Resource projection (layer 4)
+
+The server exposes three `window://com.a2c-smcp.theseus-kit` resources per the
+[A2C-SMCP Desktop spec](https://github.com/A2C-SMCP/a2c-smcp-protocol/blob/main/docs/specification/desktop.md)
+— pure-identifier URIs, metadata via `annotations` (priority/audience), no
+`_meta.fullscreen` (a single fullscreen window would exclude the others):
+
+| Resource | Priority | Content |
+|----------|----------|---------|
+| `config/summary` | 0.9 | Robot identity + three-state overview |
+| `config/recent` | 0.8 | The most recently opened configuration detail (`_last_locator` set by `get_config_detail`) |
+| `config/topology` | 0.7 | Draft configuration reference graph (`GET /v1/factory/drafts/topology`: roots/orphans/adjacency-list nodes) |
+
+Desktop participation requires the `resources.subscribe` capability, which the
+official mcp SDK (<2.0) hardcodes off.  `subscriptions.py` patches both gaps on
+a `DesktopFastMCP` subclass: the capability flag and per-session subscription
+tracking (weak-keyed registry).  `notifications/resources/updated` fires after
+mutations (and after `get_config_detail` changes the recent window) to every
+subscribed session plus the tool-calling session.  Window failures render as
+`available:false` sentinels rather than errors.  The window list is static, so
+`listChanged` stays off.
+
 ## Safety invariants
 
 - Credentials stay in the MCP server process and never enter tool output,

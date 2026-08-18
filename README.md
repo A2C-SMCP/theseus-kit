@@ -117,12 +117,13 @@ theseus-kit 通过 `skill://` 资源暴露 **7 个中文技能指南**，为 LLM
 
 ### 实时状态窗口：`window://`
 
-2 个 `window://` 资源提供配置状态的实时快照，在每次变更操作后自动通知更新：
+3 个 `window://` 资源提供配置状态的实时快照，按 [A2C-SMCP Desktop 协议](https://github.com/A2C-SMCP/a2c-smcp-protocol/blob/main/docs/specification/desktop.md)参与桌面聚合：服务器声明 `resources.subscribe` 能力并支持资源订阅，变更操作（以及 `get_config_detail` 更新「最近详情」）后通过 `notifications/resources/updated` 自动通知订阅方。
 
 | 资源 | URI | 说明 |
 |------|-----|------|
 | 配置摘要 | `window://com.a2c-smcp.theseus-kit/config/summary` | 机器人身份 + 三态概览，每次变更后刷新 |
-| 最近详情 | `window://com.a2c-smcp.theseus-kit/config/recent` | 最近打开的配置详情，无打开时返回空状态 |
+| 最近详情 | `window://com.a2c-smcp.theseus-kit/config/recent` | 最近打开的配置详情（用户最后一次访问打开的配置面板），无打开时返回空状态 |
+| 配置拓扑 | `window://com.a2c-smcp.theseus-kit/config/topology` | 草稿配置引用图（roots / orphans / 邻接表节点），即当前 Ontology 结构 |
 
 ## 使用指南
 
@@ -211,7 +212,7 @@ OAuth 模式下的配置：
 ```
 ┌──────────────────────────────────────────┐
 │  MCP 表面层（server.py）                  │
-│  FastMCP · 9 工具 · 2 window:// 资源      │
+│  FastMCP · 9 工具 · 3 window:// 资源      │
 │  3 skill:// 资源 · OAuth PRM 路由         │
 ├──────────────────────────────────────────┤
 │  应用服务层（services/）                   │

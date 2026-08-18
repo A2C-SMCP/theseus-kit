@@ -1,8 +1,8 @@
 """Resource projection layer — architecture layer 4.
 
-Exposes two ``window://`` resources for A2C-SMCP compatibility. No caching —
-every read fetches live data from the target robot via
-:class:`~theseus_kit.services.config_reader.ConfigReader`.
+Exposes three ``window://`` resources (summary / recent / topology) for
+A2C-SMCP compatibility. No caching — every read fetches live data from the
+target robot via :class:`~theseus_kit.services.config_reader.ConfigReader`.
 
 The only in-process state is a single ``_last_locator`` pointer (the locator
 from the most recent :meth:`ConfigReader.get_detail` call). When it is
@@ -65,3 +65,27 @@ async def build_recent(client: RobotClient, robot_id: str) -> dict[str, Any]:
         }
 
     return detail.model_dump(by_alias=True, mode="json")
+
+
+async def build_topology(client: RobotClient, robot_id: str) -> dict[str, Any]:
+    """Build the ``config/topology`` resource payload.
+
+    Fetches the draft configuration reference graph via
+    :meth:`ConfigReader.get_topology`.  On failure (network error, a target
+    TFRobotServer without the endpoint, parse error) returns the same
+    empty-state sentinel shape as :meth:`build_recent` so the window always
+    renders.
+    """
+    reader = ConfigReader(robot_id=robot_id)
+    try:
+        topology = await reader.get_topology(client)
+    except Exception:
+        return {
+            "available": False,
+            "message": (
+                "Failed to read draft topology. Retry later — the target "
+                "TFRobotServer must be >= 0.3.0-rc2 for the topology endpoint."
+            ),
+        }
+
+    return topology.model_dump(by_alias=True, mode="json")
