@@ -65,7 +65,7 @@ from theseus_kit.services import (
 )
 from theseus_kit.transport import RobotClient, StaticTokenSource
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "__version__",

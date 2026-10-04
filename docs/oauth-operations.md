@@ -63,10 +63,9 @@ VS Code MCP 扩展等）。
 
 ### 首次登录
 
-1. **启动 theseus-kit**（配置 `kind=oauth`）：
-   ```bash
-   uv run theseus-kit
-   ```
+1. **启动 HTTP MCP 服务**（配置 `kind=oauth`）：宿主程序通过
+   `create_mcp_server(settings)` 构造服务并选择 HTTP 传输。默认 `theseus-kit`
+   命令仅启动 stdio，不能提供以下 HTTP PRM 与 Bearer 授权流程；stdio 外部回调登录尚未实现。
 
 2. **MCP Client 发现 PRM**：Client 读取
    `/.well-known/oauth-protected-resource`，获取

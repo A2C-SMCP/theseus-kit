@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `theseus-kit` 是一个 MCP 服务器，用于安全地检查、编辑、模板化和发布 TFRobot 配置。它通过标准 MCP 协议运行，同时暴露可选的 A2C-SMCP 兼容的 `window://` 和 `skill://` 资源。
 
-当前状态：0.1.0 项目骨架阶段，配置变更工具尚未实现。详情见 [0.1.0 里程碑](https://github.com/A2C-SMCP/theseus-kit/milestone/1)。
+当前状态：0.1.1，已实现 11 个 MCP 工具、3 个配置窗口和 12 类技能。默认 stdio 入口使用用户 PAT；无 PAT 的 stdio OAuth 外部回调登录尚未实现。
 
 ## 开发命令
 
@@ -68,7 +68,7 @@ uv run poe ci && uv run poe build && uv run poe package-check
 ### 分层设计
 
 1. **MCP 表面层**（`server.py`）— FastMCP 实例，工具/资源声明
-2. **应用服务层**（尚未实现）— 读、编辑、保存模板、发布用例
+2. **应用服务层**（`services/`）— 读取、创建、编辑、删除、校验、保存模板、发布用例
 3. **TFRobot 客户端**（`transport.py`、`routing.py`、`tokens.py`、`credentials.py`）— 认证 HTTP 适配器，对接 `/v1/factory/**` 和 `/llms.txt`
 4. **资源投影层** — `window://` 实时快照（`resources.py`，三个窗口 summary/recent/topology + 订阅能力 `subscriptions.py`）与 `skill://` 技能指南（`skills/`，12 个类别，三层结构）：`theseus` 总纲调度 → 阶段技能 `persona-interview` / `persona-optimize` / `plan-config` / `apply-config-plan` → 原子技能 `analyze-config` / `manage-topology` / `tune-config` / `save-template` / `publish-config` / `write-tfonto`，外加反馈闭环技能 `enhance`。阶段交接物在机器人工作区 `~/.theseus/workspaces/<slug>/`（画像 `<slug>.md` + `configs/` + `plans/`）
 
@@ -134,7 +134,7 @@ TheseusSettings (env/.env)
 
 ## 渐进披露契约（已冻结）
 
-大配置的渐进披露采用方案 A：无状态索引 + 结构化选择器，覆盖 draft/template/online 三态。默认 8 KiB、硬上限 32 KiB。四种工具：`get_config_summary` → `list_config_nodes` → `get_config_detail` → `get_config_value`。规范见 `docs/progressive-disclosure.md`（#2 决定，不可更改除非重新开启该 Issue）。
+大配置的渐进披露采用方案 A：无状态索引 + 结构化选择器，覆盖 draft/template/online 三态。默认 8 KiB、硬上限 32 KiB。使用 `get_config_summary`、`list_config_nodes`、`get_config_detail` 和 `get_template`；当前没有 `get_config_value` 工具。规范见 `docs/progressive-disclosure.md`（#2 决定，不可更改除非重新开启该 Issue）。
 
 ## 关键设计文档
 
