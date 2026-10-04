@@ -217,12 +217,13 @@ async def test_read_analyze_config() -> None:
 
 
 async def test_read_manage_topology() -> None:
-    """manage-topology SKILL.md contains create_draft, delete, and factory selection."""
+    """manage-topology SKILL.md contains create_draft, delete_draft, and factory selection."""
     mcp = create_mcp_server(_settings())
     result = await mcp.read_resource(f"{_SKILL_NS}/manage-topology")
     content = _read_text(result)
 
     assert "create_draft" in content
+    assert "delete_draft" in content
     assert "update_draft" in content
     assert "factory-catalog" in content
     assert "factory-selection" in content

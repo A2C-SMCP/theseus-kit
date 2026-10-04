@@ -23,11 +23,11 @@
 **环境要求**：Python 3.11+，[uv](https://docs.astral.sh/uv/)。
 
 ```bash
-# 安装
-uv sync --locked --all-groups
+# 安装正式发行包
+uv tool install "theseus-kit==0.1.1"
 
-# 启动 MCP 服务器（stdio 传输）
-uv run theseus-kit
+# 完成下方配置后，启动 MCP 服务器（stdio 传输）
+theseus-kit
 ```
 
 ### 最小配置
@@ -42,23 +42,20 @@ export THESEUS_ROBOT__ROBOT_TYPE="tfrobot"
 export THESEUS_ROBOT__API_BASE_URL="https://api.example.com"
 export THESEUS_ROBOT__MANAGER_BASE_URL="https://manager.example.com"
 
-# 凭证（二选一）
-# 方式 1：用户个人令牌（推荐——theseus-kit 是人管配置的工具，非 A2A）
+# 用户个人令牌（stdio 入口使用此方式）
 export THESEUS_CREDENTIAL__KIND="user_pat"
 export THESEUS_CREDENTIAL__PAT="tfp_xxx"
 export THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID="myorg:000042"
 # 可选：显式缩窄短 Token；不设置时默认申请以下三个配置 scope
 export THESEUS_CREDENTIAL__SCOPES="config:read config:write config:publish"
-
-# 方式 2：OAuth 2.0（MCP Client 驱动授权）
-export THESEUS_CREDENTIAL__KIND="oauth"
-export THESEUS_CREDENTIAL__AUTHORIZATION_SERVER="https://manager.example.com"
-export THESEUS_CREDENTIAL__SCOPES="config:read config:write"
 ```
+
+`0.1.1` 的默认命令行入口通过 stdio 运行，支持用户 PAT 换发。无 PAT 的 stdio OAuth
+外部回调登录尚未实现；HTTP OAuth 的服务端集成见 [OAuth 运行手册](docs/oauth-operations.md)。
 
 ## MCP 工具
 
-theseus-kit 提供 **9 个 MCP 工具**，覆盖配置的完整生命周期：
+theseus-kit 提供 **11 个 MCP 工具**，覆盖配置的完整生命周期：
 
 ### 只读工具
 
@@ -74,7 +71,9 @@ theseus-kit 提供 **9 个 MCP 工具**，覆盖配置的完整生命周期：
 
 | 工具 | 说明 | 所需 Scope |
 |------|------|------------|
+| `create_draft` | 在指定 Scene 下用指定 Factory 创建新草稿节点 | `config:write` |
 | `update_draft` | 更新草稿配置项，支持 `expected_hash` 乐观并发控制 | `config:write` |
+| `delete_draft` | 删除草稿节点（服务端自动级联清理其它草稿对它的引用） | `config:write` |
 | `validate_draft` | 验证草稿配置是否满足上线条件（全量预检或指定节点），返回逐节点校验结果 | `config:write` |
 | `save_template` | 将草稿子树保存为可复用模板 | `config:write` |
 | `publish_config` | 将所有草稿发布到线上，要求 `acknowledge_publish=true` 显式确认 | `config:publish` |
@@ -99,10 +98,15 @@ publish_config            ← 发布：显式确认 + root_hash 校验
 
 ## Skill 资源
 
-theseus-kit 通过 `skill://` 资源暴露 **7 个中文技能指南**，为 LLM 提供结构化的操作流程：
+theseus-kit 通过 `skill://` 资源暴露 **12 个中文技能指南**，为 LLM 提供结构化的操作流程：
 
 | Skill | 资源 URI | 说明 |
 |-------|----------|------|
+| 工作流总纲 | `skill://com.a2c-smcp.theseus-kit/theseus` | 调度画像 → 计划 → 落地三阶段工作流 |
+| 画像优化 | `skill://com.a2c-smcp.theseus-kit/persona-optimize` | 增量采访并同步画像正文与变更记录 |
+| 配置计划 | `skill://com.a2c-smcp.theseus-kit/plan-config` | 生成结构化工件、技术选型和可续接的配置修改计划 |
+| 落地计划 | `skill://com.a2c-smcp.theseus-kit/apply-config-plan` | 逐条落实计划到 Draft 并回写进度 |
+| 反馈改进 | `skill://com.a2c-smcp.theseus-kit/enhance` | 提交脱敏的问题与改进建议 |
 | 分析配置 | `skill://com.a2c-smcp.theseus-kit/analyze-config` | 确认目标 → 全局概览 → LLMTEXT 技术选型 → 优化大纲 |
 | 管理拓扑 | `skill://com.a2c-smcp.theseus-kit/manage-topology` | 创建节点 → 删除节点 → 修改引用关系，结合 LLMTEXT 进行技术选型 |
 | 调优配置 | `skill://com.a2c-smcp.theseus-kit/tune-config` | 读取现状 → 理解字段约束 → 合理化修改 → 校验 → 冲突处理 |
@@ -117,12 +121,13 @@ theseus-kit 通过 `skill://` 资源暴露 **7 个中文技能指南**，为 LLM
 
 ### 实时状态窗口：`window://`
 
-2 个 `window://` 资源提供配置状态的实时快照，在每次变更操作后自动通知更新：
+3 个 `window://` 资源提供配置状态的实时快照，按 [A2C-SMCP Desktop 协议](https://github.com/A2C-SMCP/a2c-smcp-protocol/blob/main/docs/specification/desktop.md)参与桌面聚合：服务器声明 `resources.subscribe` 能力并支持资源订阅，变更操作（以及 `get_config_detail` 更新「最近详情」）后通过 `notifications/resources/updated` 自动通知订阅方。
 
 | 资源 | URI | 说明 |
 |------|-----|------|
 | 配置摘要 | `window://com.a2c-smcp.theseus-kit/config/summary` | 机器人身份 + 三态概览，每次变更后刷新 |
-| 最近详情 | `window://com.a2c-smcp.theseus-kit/config/recent` | 最近打开的配置详情，无打开时返回空状态 |
+| 最近详情 | `window://com.a2c-smcp.theseus-kit/config/recent` | 最近打开的配置详情（用户最后一次访问打开的配置面板），无打开时返回空状态 |
+| 配置拓扑 | `window://com.a2c-smcp.theseus-kit/config/topology` | 草稿配置引用图（roots / orphans / 邻接表节点），即当前 Ontology 结构 |
 
 ## 使用指南
 
@@ -141,7 +146,7 @@ theseus-kit 通过 `skill://` 资源暴露 **7 个中文技能指南**，为 LLM
 
 #### 2. OAuth 2.0 模式
 
-无显式凭证时，走 MCP 标准 OAuth 授权：
+服务端组合根提供 HTTP MCP 的 OAuth Protected Resource 支持，由 MCP Client 驱动授权：
 
 ```
 MCP Client → TFRSManager AS（Authorization Code + PKCE）
@@ -150,9 +155,10 @@ MCP Client → TFRSManager AS（Authorization Code + PKCE）
 → 直传 TFRobotServer（无需换发）
 ```
 
-适合**交互式使用**：用户在 MCP Client 中完成授权，无需手动管理令牌。
+HTTP 集成适合交互式使用。默认 `theseus-kit` 命令仅启动 stdio；其无 PAT OAuth
+外部回调登录尚未实现，不能用下面的 stdio 客户端配置启用 HTTP OAuth。
 
-> **凭证选择不变式**：显式凭证（user_pat）始终优先；OAuth 仅在无显式凭证时启用。
+> **凭证选择**：`THESEUS_CREDENTIAL__KIND` 显式选择 `user_pat` 或 `oauth`。
 > 配置错误不会静默降级，而是抛出明确的 `ConfigError`。
 
 ### MCP Client 集成
@@ -163,8 +169,8 @@ MCP Client → TFRSManager AS（Authorization Code + PKCE）
 {
   "mcpServers": {
     "theseus-kit": {
-      "command": "uv",
-      "args": ["run", "theseus-kit"],
+      "command": "uvx",
+      "args": ["--from", "theseus-kit==0.1.1", "theseus-kit"],
       "env": {
         "THESEUS_ROBOT__ROBOT_ID": "my-robot",
         "THESEUS_ROBOT__NAMESPACE": "default",
@@ -181,28 +187,7 @@ MCP Client → TFRSManager AS（Authorization Code + PKCE）
 }
 ```
 
-OAuth 模式下的配置：
-
-```json
-{
-  "mcpServers": {
-    "theseus-kit": {
-      "command": "uv",
-      "args": ["run", "theseus-kit"],
-      "env": {
-        "THESEUS_ROBOT__ROBOT_ID": "my-robot",
-        "THESEUS_ROBOT__NAMESPACE": "default",
-        "THESEUS_ROBOT__ROBOT_TYPE": "tfrobot",
-        "THESEUS_ROBOT__API_BASE_URL": "https://api.example.com",
-        "THESEUS_ROBOT__MANAGER_BASE_URL": "https://manager.example.com",
-        "THESEUS_CREDENTIAL__KIND": "oauth",
-        "THESEUS_CREDENTIAL__AUTHORIZATION_SERVER": "https://manager.example.com",
-        "THESEUS_CREDENTIAL__SCOPES": "config:read config:write"
-      }
-    }
-  }
-}
-```
+HTTP OAuth 接入方式和当前限制见 [OAuth 运行手册](docs/oauth-operations.md)。
 
 ## 工作原理
 
@@ -211,8 +196,8 @@ OAuth 模式下的配置：
 ```
 ┌──────────────────────────────────────────┐
 │  MCP 表面层（server.py）                  │
-│  FastMCP · 9 工具 · 2 window:// 资源      │
-│  3 skill:// 资源 · OAuth PRM 路由         │
+│  FastMCP · 11 工具 · 3 window:// 资源     │
+│  12 类 skill:// 指南 · OAuth PRM 路由     │
 ├──────────────────────────────────────────┤
 │  应用服务层（services/）                   │
 │  ConfigReader · DraftEditor · Publisher   │
@@ -308,7 +293,7 @@ OAuthConfig
 | 模块 | 职责 |
 |------|------|
 | `server.py` | FastMCP 组合根，工具/资源注册，OAuth PRM 路由 |
-| `config.py` | `TheseusSettings`（pydantic-settings），三种凭证配置的判别联合 |
+| `config.py` | `TheseusSettings`（pydantic-settings），两种凭证配置的判别联合 |
 | `transport.py` | `RobotClient` + `RobotAuth`（Bearer + X-TF-* 注入）+ `StaticTokenSource` |
 | `oauth.py` | `TheseusTokenVerifier`（tfrs-auth → MCP SDK 适配）+ RFC 8414 发现 |
 | `tokens.py` | `build_token_source()` — `AsyncCachingTokenSource` 组装 |

@@ -30,6 +30,7 @@ from theseus_kit.models import (
     ConfigSummary,
     CreateDraftResponse,
     CursorData,
+    DeleteDraftResponse,
     DraftTopology,
     DraftValidateResponse,
     DraftValidationErrorItem,
@@ -56,6 +57,7 @@ from theseus_kit.services import (
     ConfigPublisher,
     ConfigReader,
     DraftCreator,
+    DraftDeleter,
     DraftEditor,
     DraftValidator,
     LlmsDocReader,
@@ -63,7 +65,7 @@ from theseus_kit.services import (
 )
 from theseus_kit.transport import RobotClient, StaticTokenSource
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "__version__",
@@ -103,6 +105,7 @@ __all__ = [
     "NodeKind",
     "ConfigDetail",
     "CreateDraftResponse",
+    "DeleteDraftResponse",
     "DraftTopology",
     "DraftValidateResponse",
     "DraftValidationErrorItem",
@@ -118,6 +121,7 @@ __all__ = [
     "compute_config_hash",
     "ConfigPublisher",
     "DraftCreator",
+    "DraftDeleter",
     "DraftValidator",
     "TemplateSaver",
     "PublishNotConfirmedError",

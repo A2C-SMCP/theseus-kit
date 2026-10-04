@@ -2,6 +2,7 @@
 
 from theseus_kit.services.config_reader import ConfigReader
 from theseus_kit.services.draft_creator import DraftCreator
+from theseus_kit.services.draft_deleter import DraftDeleter
 from theseus_kit.services.draft_editor import DraftEditor
 from theseus_kit.services.draft_validator import DraftValidator
 from theseus_kit.services.llms_doc_reader import LlmsDocReader
@@ -12,6 +13,7 @@ __all__ = [
     "ConfigPublisher",
     "ConfigReader",
     "DraftCreator",
+    "DraftDeleter",
     "DraftEditor",
     "DraftValidator",
     "LlmsDocReader",

@@ -25,13 +25,16 @@ uv run poe build
 uv run poe package-check
 ```
 
-更新 `CHANGELOG.md`，然后用 bump-my-version 同步更新 `pyproject.toml` 与 `src/theseus_kit/__init__.py`：
+先用 bump-my-version 同步更新版本配置、`pyproject.toml` 与 `src/theseus_kit/__init__.py`，再刷新锁文件中的项目版本：
 
 ```bash
-uv run bump-my-version bump --new-version 0.1.0rc1
+uv run bump-my-version bump --new-version 0.1.1 --no-commit --no-tag
+uv lock
 ```
 
-该命令会创建 Commit 和 `v0.1.0rc1` Tag。推送前必须人工 Review。
+更新 `CHANGELOG.md` 和使用说明，重跑上述门禁并检查发行包版本，然后 Review 完整 diff。
+版本准备阶段不创建 Tag；正式版先通过 PR 合入 `main`，确认该提交的 CI 通过后，
+再在对应提交创建 `v0.1.1` Tag 和正式 GitHub Release。预发行版使用如 `0.1.2rc1` 的版本号和 GitHub Pre-release。
 
 ## 发布规则
 
@@ -42,4 +45,3 @@ uv run bump-my-version bump --new-version 0.1.0rc1
 - 发布使用 GitHub OIDC；不保存 PyPI/TestPyPI Token。
 
 发布是不可逆的外部操作。创建 GitHub Release 前必须明确获得维护者批准。
-

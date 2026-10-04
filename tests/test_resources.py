@@ -1,6 +1,6 @@
 """Tests for Issue #9 — window:// resource projection.
 
-Validates the two ``window://`` resources via FastMCP's ``list_resources``
+Validates the three ``window://`` resources via FastMCP's ``list_resources``
 and ``read_resource``, backed by :class:`FakeRobotServer` for real TCP
 round-trips.
 """
@@ -23,6 +23,7 @@ from ._fakeserver import FakeRobotServer, RobotResponse
 _WINDOW_NS = "window://com.a2c-smcp.theseus-kit"
 _SUMMARY_URI = f"{_WINDOW_NS}/config/summary"
 _RECENT_URI = f"{_WINDOW_NS}/config/recent"
+_TOPOLOGY_URI = f"{_WINDOW_NS}/config/topology"
 
 
 # -- Helpers ---------------------------------------------------------------
@@ -79,10 +80,10 @@ def _setup_summary_scenes(fake: FakeRobotServer) -> None:
 # -- Resource listing ------------------------------------------------------
 
 
-async def test_list_resources_includes_both_window_resources(
+async def test_list_resources_includes_all_window_resources(
     fake: FakeRobotServer,
 ) -> None:
-    """resources/list returns the two window:// resources."""
+    """resources/list returns the three window:// resources."""
     _setup_summary_scenes(fake)
     mcp = create_mcp_server(_settings(fake))
 
@@ -91,6 +92,7 @@ async def test_list_resources_includes_both_window_resources(
 
     assert _SUMMARY_URI in uris
     assert _RECENT_URI in uris
+    assert _TOPOLOGY_URI in uris
 
 
 async def test_summary_resource_annotations(fake: FakeRobotServer) -> None:
@@ -219,10 +221,10 @@ async def test_read_recent_stale_locator_graceful_error(fake: FakeRobotServer) -
 
 
 async def test_resource_uri_format() -> None:
-    """Both window:// URIs follow the no-query conformance rule."""
+    """All window:// URIs follow the no-query conformance rule."""
     from urllib.parse import urlparse
 
-    for uri in (_SUMMARY_URI, _RECENT_URI):
+    for uri in (_SUMMARY_URI, _RECENT_URI, _TOPOLOGY_URI):
         parsed = urlparse(uri)
         assert parsed.query == "", f"{uri} must not contain query parameters"
         # window:// is parsed as scheme=window with netloc from //
