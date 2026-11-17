@@ -378,6 +378,33 @@ class TestBuildTokenVerifier:
         paths = [p for m, p in fake_oauth_server.requests if m == "GET"]
         assert "/.well-known/oauth-authorization-server" in paths
 
+    def test_derives_robot_audience_from_issuer_and_public_id(
+        self,
+        rsa_keys: _RSAKeyPair,
+        fake_oauth_server: _FakeOAuthServer,
+    ) -> None:
+        """TFRM-760: expected aud = {issuer}/robots/{public_id}."""
+        priv, _ = rsa_keys
+        public_id = "turingfocus:EMP010-R"
+        expected_aud = f"{fake_oauth_server.base_url}/robots/{public_id}"
+
+        async def _verify(aud: str) -> AccessToken | None:
+            verifier = await build_token_verifier(
+                fake_oauth_server.base_url,
+                robot_public_id=public_id,
+                required_scope="config:read",
+            )
+            token = _sign_token(
+                priv,
+                iss=fake_oauth_server.base_url,
+                aud=aud,
+                scope="config:read",
+            )
+            return await verifier.verify_token(token)
+
+        assert asyncio.run(_verify(expected_aud)) is not None
+        assert asyncio.run(_verify("rs-1")) is None
+
 
 # ── E2E smoke test (THESEUS_E2E=1) ───────────────────────────────────────
 

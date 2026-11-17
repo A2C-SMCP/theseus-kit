@@ -22,39 +22,46 @@ version remains its own configuration-documentation source of truth.
 
 ## Auth and routing (layer 3)
 
-The TFRobot client authenticates via `tfrs-auth` and routes over the cluster's
-`api.<clusterDomain>` entry. Contract (confirmed by tfrs-operator, tracked in
-[#17](https://github.com/A2C-SMCP/theseus-kit/issues/17)):
+The TFRobot client authenticates via `tfrs-auth` and routes over the Operator's
+Host-authoritative tenant ingress. Contract confirmed by TFRM/TFRO/TFRS develop
+(2026-11); full upgrade report: [`upgrade-plan-robot-address-v2.md`](upgrade-plan-robot-address-v2.md).
 
-- **Entry**: `https://api.<clusterDomain>` (Istio gateway, host-authoritative);
-  the in-cluster `tfrobot-http.<ns>` service is not reachable from outside the
-  cluster and is never configured by theseus-kit.
-- **Routing headers**: every robot request carries `X-TF-Namespace`,
-  `X-TF-RobotId`, and `X-TF-RobotType` — all three mandatory (missing any ⇒ 400).
-  theseus-kit produces them from explicit config via `RequestContext`; it never
-  self-derives them and has no dependency on a Manager discovery API.
-- **Identity split**: the token `audience` is `robot:<Account.ID>` (numeric) — a
-  *different* identifier from `X-TF-RobotId` (the rid). These must never be
-  conflated; a single robot has both.
+- **Entry**: `https://{alias}/c/tfrobot/{rid}/` — Manager's authoritative
+  `accessURL`. The Host (tenant alias) determines the namespace; the
+  `/c/{robotType}/{robotId}` path determines the robot. The Operator strips that
+  path prefix and forwards `/v1/factory/**` / `/llms.txt` to TFRobotServer.
+- **No routing headers**: `X-TF-*` is retired; the gateway removes any inbound
+  values and derives routing only from Host + path. theseus-kit sends only
+  `Authorization: Bearer`.
+- **Manager machine API** is separate: `manager_api_base_url` (test
+  `https://rest.test.turingfocus.cn`, staging `api-staging…`, prod `api…`) is the
+  token-exchange/discovery origin; it is not the JWT issuer and not the robot
+  entry.
+- **Identity split**: the token `audience` is `robot:{orgSlug}:{employeeNo}`
+  (public_id) for PAT token-exchange — a *different* identifier from the rid in
+  the URL path. OAuth Authorization Code uses `{issuer}/robots/{public_id}`
+  (`typ=at+jwt`, TFRM-760).
 - **Credentials**: `user_pat` (user personal access token exchanged via
-  token-exchange for a robot-scoped JWT) is the explicit credential path.
-  Uses `tfrs-auth`'s `AsyncCachingTokenSource` (cache / single-flight /
-  near-expiry refresh / backoff) — theseus-kit reimplements none of that
-  machinery.
+  token-exchange for a robot-scoped JWT) is the production path. Uses
+  `tfrs-auth`'s `AsyncCachingTokenSource` (cache / single-flight / near-expiry
+  refresh / backoff) — theseus-kit reimplements none of that machinery.
+- **Gateway errors**: unknown Host / robot-not-on-Host → 404 (typed
+  `RobotRouteNotFoundError`); retained old alias → 409 `ROBOT_ADDRESS_CHANGED`
+  (typed `RobotAddressChangedError`, no retry); invalid path → 400.
 - **No auto refresh-retry on robot 401/403**: a rejected token surfaces as a
   typed `AuthRejectedError`. Refresh-on-401 would require an upstream
   token-source invalidator (not yet available); until then it is out of scope.
 
 ## OAuth (no-PAT) path (#18)
 
-When ``kind=oauth`` is configured, theseus-kit acts as an OAuth
-Protected Resource (RS) per the MCP Authorization specification — an alternative
-to the ``user_pat`` path. The MCP Client
-drives the standard OAuth 2.0/2.1 authorization-code + PKCE flow against the
-TFRSManager AS; theseus-kit validates the resulting Bearer token and forwards it
-directly to TFRobotServer — **no token exchange** (TFRobotServer natively accepts
-OAuth AS tokens, confirmed by the TFRobotServer team). Full rationale:
-[`docs/auth-oauth-design.md`](auth-oauth-design.md) §10.1-new.
+When ``kind=oauth`` is configured, theseus-kit acts as an OAuth Protected
+Resource (RS) per the MCP Authorization specification — an alternative to the
+``user_pat`` path. The MCP Client drives the authorization-code + PKCE flow
+against the TFRSManager AS; theseus-kit validates the resulting Bearer token and
+forwards it directly to TFRobotServer — **no token exchange**. TFRobotServer
+accepts the Manager Authorization Code profile when the audience is
+`{issuer}/robots/{public_id}` and `typ=at+jwt` (TFRM-760). Full rationale:
+[`docs/auth-oauth-design.md`](auth-oauth-design.md).
 
 The two credential paths converge at `RobotClient` but follow different mechanics
 upstream:
@@ -65,16 +72,16 @@ upstream:
 TheseusSettings(credential)
   → build_credential()         # config → tfrs_auth.PatCredential
   → build_token_source()       # AsyncCachingTokenSource (cache / single-flight / near-expiry refresh / backoff)
-  → RobotClient(RobotAuth)     # Bearer + X-TF-* per request
+  → RobotClient(RobotAuth)     # Bearer only, base_url = access_url
 ```
 
-**Path B — OAuth** (direct forward, #18 S1–S3):
+**Path B — OAuth** (direct forward, #18):
 
 ```
 MCP Client (OAuth授权 + Bearer)
-  → TheseusTokenVerifier       # RS256 + JWKS (tfrs-auth JwtVerifier), local validation
+  → TheseusTokenVerifier       # RS256 + JWKS; audience = {issuer}/robots/{public_id}
   → StaticTokenSource          # pre-validated token, no exchange / caching / refresh
-  → RobotClient(RobotAuth)     # same Bearer + X-TF-* injection
+  → RobotClient(RobotAuth)     # Bearer only, base_url = access_url
 ```
 
 | Path | Token source | Exchange (RFC 8693) | Cache / refresh |
@@ -82,21 +89,20 @@ MCP Client (OAuth授权 + Bearer)
 | user_pat | `AsyncCachingTokenSource` | Yes (RFC 8693 token-exchange) | Yes |
 | OAuth | `StaticTokenSource` | No (direct forward) | No (MCP Client side) |
 
-Key modules added for #18 (see [`auth-oauth-design.md`](auth-oauth-design.md) §12 for
-the full slice breakdown):
+Key modules for #18 (see [`auth-oauth-design.md`](auth-oauth-design.md)):
 
 - **`oauth.py`**: `TheseusTokenVerifier` — adapts `tfrs_auth.JwtVerifier` →
   MCP SDK `TokenVerifier` protocol. `build_token_verifier()` performs RFC 8414
-  AS metadata discovery to obtain ``jwks_uri`` and ``issuer``.
+  AS metadata discovery and derives the expected robot audience from the
+  discovered issuer + `robot_public_id`.
 - **`server.py`**: `_LazyOAuthTokenVerifier` defers async AS discovery to the first
   ``verify_token`` call (single-flight lock). `create_mcp_server()` wires
   `AuthSettings` + `token_verifier` when `OAuthConfig` is detected.
 - **`transport.py`**: `StaticTokenSource` — holds a pre-validated bearer with no
   exchange/caching/refresh. `RobotClient.for_static_token()` factory for the OAuth
   path. `RobotAuth` accepts `AsyncCachingTokenSource | StaticTokenSource`.
-- **`config.py`**: `OAuthConfig` — `authorization_server`, `scopes`, `client_id`,
-  `redirect_uri`, `resource_server_url`. Added as third variant to the
-  `CredentialConfig` discriminated union.
+- **`config.py`**: `OAuthConfig` — `authorization_server`, `robot_public_id`,
+  `scopes`, `client_id`, `redirect_uri`, `resource_server_url`.
 
 **Topology B (STDIO external callback, S4)**: not yet implemented — depends on the
 P1 upstream capability in tfrs-auth (transport-agnostic OAuth 2.1 acquisition client).

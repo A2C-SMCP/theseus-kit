@@ -30,11 +30,10 @@ from theseus_kit.server import create_mcp_server
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 _KIT_ENV = {
+    "THESEUS_ROBOT__ACCESS_URL": "https://localhost:1/c/tfrobot/entry-robot/",
     "THESEUS_ROBOT__ROBOT_ID": "entry-robot",
-    "THESEUS_ROBOT__NAMESPACE": "entry-ns",
     "THESEUS_ROBOT__ROBOT_TYPE": "tfrobot",
-    "THESEUS_ROBOT__API_BASE_URL": "https://localhost:1",
-    "THESEUS_ROBOT__MANAGER_BASE_URL": "https://localhost:1",
+    "THESEUS_ROBOT__MANAGER_API_BASE_URL": "https://localhost:1",
     "THESEUS_CREDENTIAL__KIND": "user_pat",
     "THESEUS_CREDENTIAL__PAT": "tfp_entry_test_pat",
     "THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID": "entryorg:10001",
@@ -68,11 +67,10 @@ async def _composition_root_surface() -> tuple[set[str], set[str]]:
     """Tools + resource URIs served by the settings-driven composition root."""
     settings = TheseusSettings(
         robot={
+            "access_url": "https://localhost:1/c/tfrobot/entry-robot/",
             "robot_id": "entry-robot",
-            "namespace": "entry-ns",
             "robot_type": "tfrobot",
-            "api_base_url": "https://localhost:1",
-            "manager_base_url": "https://localhost:1",
+            "manager_api_base_url": "https://localhost:1",
         },
         credential={
             "kind": "user_pat",
@@ -149,11 +147,11 @@ def test_console_entry_config_error_redacts_secrets(tmp_path: Path) -> None:
     """Config errors that would echo a secret never leak it to the console.
 
     The URL validators embed the offending value in their message
-    (``got {value!r}``) — a PAT-shaped ``api_base_url`` makes pydantic
+    (``got {value!r}``) — a PAT-shaped ``access_url`` makes pydantic
     actually echo the secret, so this asserts the scrubber truly scrubs.
     """
     kit_env = dict(_KIT_ENV)
-    kit_env["THESEUS_ROBOT__API_BASE_URL"] = "tfp_redact_me_entry"
+    kit_env["THESEUS_ROBOT__ACCESS_URL"] = "tfp_redact_me_entry"
     env = _subprocess_env(**kit_env)
     proc = subprocess.run(
         [sys.executable, "-m", "theseus_kit"],
@@ -164,9 +162,9 @@ def test_console_entry_config_error_redacts_secrets(tmp_path: Path) -> None:
         input="",
         timeout=15,
     )
-    assert proc.returncode != 0, "entry must fail on an invalid api_base_url"
+    assert proc.returncode != 0, "entry must fail on an invalid access_url"
     assert "tfp_redact_me_entry" not in proc.stderr + proc.stdout, "secret must never reach the console"
-    assert "THESEUS_ROBOT__API_BASE_URL" in proc.stderr, f"error must stay actionable: {proc.stderr!r}"
+    assert "THESEUS_ROBOT__ACCESS_URL" in proc.stderr, f"error must stay actionable: {proc.stderr!r}"
 
 
 def test_console_entry_config_error_keeps_long_env_hints(tmp_path: Path) -> None:

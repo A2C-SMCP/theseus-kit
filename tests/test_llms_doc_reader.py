@@ -17,14 +17,10 @@ from theseus_kit import (
     RobotClient,
     UserPatConfig,
 )
-from theseus_kit.routing import RequestContext
 from theseus_kit.services.llms_doc_reader import LlmsDocReader
 from theseus_kit.tokens import build_token_source
 
 from ._fakeserver import FakeRobotServer, RobotResponse
-
-_CTX = dict(robot_id="robot-1", namespace="default", robot_type="tfrobot")
-
 
 # -- Helpers ---------------------------------------------------------------
 
@@ -40,12 +36,10 @@ def _client(fake: FakeRobotServer) -> RobotClient:
         pat=SecretStr("tfp_test_pat"),
         robot_public_id="turingfocus:000042",
     )
-    token_source = build_token_source(cred, manager_base_url=fake.manager_base_url)
-    context = RequestContext(**_CTX)
+    token_source = build_token_source(cred, manager_base_url=fake.manager_api_base_url)
     return RobotClient(
         token_source,
-        context,
-        api_base_url=fake.api_base_url,
+        base_url=fake.access_url,
     )
 
 

@@ -2,11 +2,10 @@
 
 A stdlib :class:`http.server.ThreadingHTTPServer` (no extra dependencies) that
 combines a fake Manager token-exchange endpoint (``POST /api/v1/oauth/token``)
-with a fake robot (``/llms.txt``, ``/v1/factory/llm-docs/**``, arbitrary GET
-paths) on one ephemeral port. It records every received request so tests can
-assert the on-the-wire exchange form and the injected X-TF-* headers, and it
-enforces the gateway contract (missing routing header => 400) so a theseus-kit
-omission fails loudly rather than silently.
+with a fake robot on one ephemeral port.  Robot requests are accepted only under
+the canonical ``/c/tfrobot/{rid}/...`` path (the fake gateway strips the prefix
+before matching TFRobotServer routes), and must carry a Bearer token — mirroring
+the new Host/path routing contract.
 
 This is a *real* socket server — httpx makes real TCP round-trips through the
 real transport boundary (not respx/ASGITransport), per #17's acceptance bar.
@@ -15,6 +14,7 @@ real transport boundary (not respx/ASGITransport), per #17's acceptance bar.
 from __future__ import annotations
 
 import json
+import re
 import threading
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -23,7 +23,7 @@ from typing import Any
 
 from theseus_kit.tokens import TOKEN_PATH
 
-ROUTING_HEADERS = ("X-TF-Namespace", "X-TF-RobotId", "X-TF-RobotType")
+_ROBOT_PREFIX_RE = re.compile(r"^/c/(?:tfrobot|openclaw)/[a-z0-9-]+")
 
 
 @dataclass
@@ -98,22 +98,19 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == TOKEN_PATH:
             self._handle_token()
             return
-        if not self._check_routing_headers():
+        if not self._check_bearer():
             return
         resp = self._state.robot_responses.get(("POST", self._path_key()))
         if resp is None:
             resp = self._default_response(self._path_key())
         self._send(resp.status, resp.body, resp.content_type, resp.headers)
 
-    def _check_routing_headers(self) -> bool:
-        """Check X-TF-* headers; return False (and send 400) if missing."""
-        if self._state.require_routing_headers:
-            missing = [h for h in ROUTING_HEADERS if h not in self.headers]
-            if missing:
-                self._send(
-                    400,
-                    json.dumps({"error": "missing routing context", "missing": missing}).encode(),
-                )
+    def _check_bearer(self) -> bool:
+        """Require ``Authorization: Bearer`` on robot requests (gateway/TFRS auth)."""
+        if self._state.require_bearer:
+            auth = self.headers.get("authorization", "")
+            if not auth.lower().startswith("bearer "):
+                self._send(401, json.dumps({"error": "missing bearer"}).encode())
                 return False
         return True
 
@@ -133,12 +130,12 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(200, json.dumps(payload).encode())
 
     def _path_key(self) -> str:
-        """Return the path without query string for response lookup."""
-        return self.path.split("?")[0]
+        """Return the upstream path (canonical prefix stripped) without query."""
+        return self._state.path_key(self.path)
 
     def do_GET(self) -> None:
         self._record("GET", b"")
-        if not self._check_routing_headers():
+        if not self._check_bearer():
             return
         resp = self._state.robot_responses.get(self._path_key())
         if resp is None:
@@ -149,7 +146,7 @@ class _Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("content-length", "0") or "0")
         body = self.rfile.read(length) if length else b""
         self._record("PUT", body)
-        if not self._check_routing_headers():
+        if not self._check_bearer():
             return
         resp = self._state.robot_responses.get(("PUT", self._path_key()))
         if resp is None:
@@ -158,7 +155,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self) -> None:
         self._record("DELETE", b"")
-        if not self._check_routing_headers():
+        if not self._check_bearer():
             return
         resp = self._state.robot_responses.get(("DELETE", self._path_key()))
         if resp is None:
@@ -181,7 +178,9 @@ class FakeRobotServer:
         self.requests: list[RecordedRequest] = []
         self.token = TokenState()
         self.robot_responses: dict[str | tuple[str, str], RobotResponse] = {}
-        self.require_routing_headers = True
+        self.require_bearer = True
+        self.robot_id = "robot-1"
+        self.robot_type = "tfrobot"
         self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
         self._httpd.state = self  # type: ignore[attr-defined]
         self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
@@ -194,13 +193,29 @@ class FakeRobotServer:
         return f"http://{host_str}:{port}"
 
     @property
-    def manager_base_url(self) -> str:
+    def manager_api_base_url(self) -> str:
         # Token endpoint lives on the same host at /api/v1/oauth/token.
         return self.base_url
 
     @property
+    def access_url(self) -> str:
+        """Canonical robot base URL, mirroring Manager's ``accessURL``."""
+        return f"{self.base_url}/c/{self.robot_type}/{self.robot_id}/"
+
+    @property
     def api_base_url(self) -> str:
-        return self.base_url
+        """Deprecated alias retained for older tests; use :attr:`access_url`."""
+        return self.access_url
+
+    @staticmethod
+    def path_key(path: str) -> str:
+        """Strip the canonical ``/c/{type}/{id}`` gateway prefix and query."""
+        path = path.split("?")[0]
+        match = _ROBOT_PREFIX_RE.match(path)
+        if match:
+            stripped = path[len(match.group(0)) :]
+            return stripped or "/"
+        return path
 
     def token_posts(self) -> list[RecordedRequest]:
         return [r for r in self.requests if r.method == "POST" and r.path == TOKEN_PATH]
@@ -209,7 +224,7 @@ class FakeRobotServer:
         return [r for r in self.requests if r.method == "GET"]
 
     def robot_gets_for(self, path: str) -> list[RecordedRequest]:
-        return [r for r in self.requests if r.method == "GET" and r.path == path]
+        return [r for r in self.requests if r.method == "GET" and self.path_key(r.path) == path]
 
     def __enter__(self) -> FakeRobotServer:
         return self

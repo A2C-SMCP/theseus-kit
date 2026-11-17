@@ -1,9 +1,9 @@
 """Hermetic tests for S3 — StaticTokenSource + RobotClient OAuth path.
 
 Uses the real :class:`FakeRobotServer` from ``tests/_fakeserver.py`` to verify
-that ``RobotClient`` with a ``StaticTokenSource`` correctly injects the Bearer
-token and X-TF-* routing headers — a complete end-to-end round-trip through
-real TCP sockets, per the acceptance bar.
+that ``RobotClient`` with a ``StaticTokenSource`` injects the Bearer token and
+uses the canonical ``/c/tfrobot/{rid}`` path — a complete end-to-end round-trip
+through real TCP sockets, per the acceptance bar.
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ import pytest
 from tfrs_auth.client import Token
 
 from theseus_kit import (
-    RequestContext,
     RobotClient,
     RobotTarget,
     StaticTokenSource,
@@ -24,9 +23,6 @@ from theseus_kit import (
 from theseus_kit.transport import RobotAuth
 
 from ._fakeserver import FakeRobotServer
-
-_CTX = dict(robot_id="robot-1", namespace="default", robot_type="tfrobot")
-
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -108,22 +104,21 @@ class TestStaticTokenSource:
 class TestRobotAuthWithStaticTokenSource:
     """RobotAuth wired with StaticTokenSource — no network, pure header check."""
 
-    async def test_injects_bearer_and_routing_headers(self) -> None:
+    async def test_injects_bearer_only(self) -> None:
         src = StaticTokenSource(access_token="my.static.jwt")
-        ctx = RequestContext(**_CTX)
-        auth = RobotAuth(src, ctx)
+        auth = RobotAuth(src)
 
         request = httpx.Request("GET", "http://example.com/")
         async for authed in auth.async_auth_flow(request):
             assert authed.headers["Authorization"] == "Bearer my.static.jwt"
-            assert authed.headers["X-TF-Namespace"] == "default"
-            assert authed.headers["X-TF-RobotId"] == "robot-1"
-            assert authed.headers["X-TF-RobotType"] == "tfrobot"
+            assert "X-TF-Namespace" not in authed.headers
+            assert "X-TF-RobotId" not in authed.headers
+            assert "X-TF-RobotType" not in authed.headers
 
     async def test_robot_auth_accepts_static_token_source_directly(self) -> None:
         """Constructor type annotation accepts StaticTokenSource directly."""
         src = StaticTokenSource(access_token="direct.jwt")
-        auth = RobotAuth(src, RequestContext(**_CTX))
+        auth = RobotAuth(src)
         assert auth._token_source is src
 
 
@@ -135,25 +130,23 @@ class TestRobotClientForStaticToken:
 
     def test_builds_client_with_correct_api_base_url(self) -> None:
         robot = RobotTarget(
-            robot_id="r1",
-            namespace="ns",
+            access_url="https://acme.test.turingfocus.cn/c/tfrobot/robot-1/",
+            robot_id="robot-1",
             robot_type="tfrobot",
-            api_base_url="https://api.example.com",
-            manager_base_url="https://manager.example.com",
+            manager_api_base_url="https://manager.example.com",
         )
         client = RobotClient.for_static_token("my.jwt", robot=robot)
         # Use private attribute to verify — public API doesn't expose base_url.
-        assert str(client._client.base_url).rstrip("/") == "https://api.example.com"
+        assert str(client._client.base_url).rstrip("/") == "https://acme.test.turingfocus.cn/c/tfrobot/robot-1"
         asyncio.run(client.aclose())
 
     async def test_builds_with_default_verify(self) -> None:
         """for_static_token with default verify=True builds successfully."""
         robot = RobotTarget(
-            robot_id="r1",
-            namespace="ns",
+            access_url="https://acme.test.turingfocus.cn/c/tfrobot/robot-1/",
+            robot_id="robot-1",
             robot_type="tfrobot",
-            api_base_url="https://api.example.com",
-            manager_base_url="https://manager.example.com",
+            manager_api_base_url="https://manager.example.com",
         )
         client = RobotClient.for_static_token("jwt", robot=robot)
         # Construction succeeded + aclose clean.
@@ -161,11 +154,10 @@ class TestRobotClientForStaticToken:
 
     def test_accepts_scope_argument(self) -> None:
         robot = RobotTarget(
-            robot_id="r1",
-            namespace="ns",
+            access_url="https://acme.test.turingfocus.cn/c/tfrobot/robot-1/",
+            robot_id="robot-1",
             robot_type="tfrobot",
-            api_base_url="https://api.example.com",
-            manager_base_url="https://manager.example.com",
+            manager_api_base_url="https://manager.example.com",
         )
         client = RobotClient.for_static_token("jwt", robot=robot, scope="config:read")
         assert isinstance(client._token_source, StaticTokenSource)
@@ -183,8 +175,7 @@ class TestRobotClientStaticTokenE2E:
         """RobotClient with StaticTokenSource retrieves /llms.txt from fake robot."""
         client = RobotClient(
             StaticTokenSource(access_token="e2e.static.jwt"),
-            RequestContext(**_CTX),
-            api_base_url=fake_server.api_base_url,
+            base_url=fake_server.access_url,
         )
         text = await client.get_llms_txt()
         assert "# robot llms.txt" in text
@@ -194,11 +185,10 @@ class TestRobotClientStaticTokenE2E:
         self,
         fake_server: FakeRobotServer,
     ) -> None:
-        """Fake robot receives correct Authorization + X-TF-* from static client."""
+        """Fake robot receives the Bearer token and canonical path from static client."""
         client = RobotClient(
             StaticTokenSource(access_token="routing.test.jwt"),
-            RequestContext(**_CTX),
-            api_base_url=fake_server.api_base_url,
+            base_url=fake_server.access_url,
         )
         await client.get("/llms.txt")
 
@@ -206,19 +196,18 @@ class TestRobotClientStaticTokenE2E:
         assert len(reqs) >= 1
         headers = reqs[-1].headers
         assert _h(headers, "Authorization") == "Bearer routing.test.jwt"
-        assert headers.get("x-tf-namespace") == "default"
-        assert headers.get("x-tf-robotid") == "robot-1"
-        assert headers.get("x-tf-robottype") == "tfrobot"
+        assert headers.get("x-tf-namespace") is None
+        assert headers.get("x-tf-robotid") is None
+        assert headers.get("x-tf-robottype") is None
         await client.aclose()
 
     async def test_for_static_token_e2e(self, fake_server: FakeRobotServer) -> None:
         """for_static_token factory → correct routing + Bearer on fake robot."""
         robot = RobotTarget(
-            robot_id="r2",
-            namespace="prod",
+            access_url=fake_server.access_url,
+            robot_id="robot-1",
             robot_type="tfrobot",
-            api_base_url=fake_server.api_base_url,
-            manager_base_url=fake_server.base_url,
+            manager_api_base_url=fake_server.manager_api_base_url,
         )
         client = RobotClient.for_static_token("factory.e2e.jwt", robot=robot)
         text = await client.get_llms_txt()
@@ -228,16 +217,15 @@ class TestRobotClientStaticTokenE2E:
         assert len(reqs) >= 1
         h = reqs[-1].headers
         assert _h(h, "Authorization") == "Bearer factory.e2e.jwt"
-        assert h.get("x-tf-robotid") == "r2"
-        assert h.get("x-tf-namespace") == "prod"
+        assert h.get("x-tf-robotid") is None
+        assert h.get("x-tf-namespace") is None
         await client.aclose()
 
     async def test_get_factory_doc_with_static_token(self, fake_server: FakeRobotServer) -> None:
         """Read-only helper get_factory_doc works with static token."""
         client = RobotClient(
             StaticTokenSource(access_token="doc.jwt"),
-            RequestContext(**_CTX),
-            api_base_url=fake_server.api_base_url,
+            base_url=fake_server.access_url,
         )
         doc = await client.get_factory_doc("my-version")
         assert "factory-doc" in doc
@@ -247,8 +235,7 @@ class TestRobotClientStaticTokenE2E:
         """Async context manager with StaticTokenSource closes without error."""
         async with RobotClient(
             StaticTokenSource(access_token="ctx.jwt"),
-            RequestContext(**_CTX),
-            api_base_url=fake_server.api_base_url,
+            base_url=fake_server.access_url,
         ) as client:
             text = await client.get_llms_txt()
             assert "# robot llms.txt" in text
@@ -257,8 +244,7 @@ class TestRobotClientStaticTokenE2E:
         """Each request carries the same static token (no rotation)."""
         client = RobotClient(
             StaticTokenSource(access_token="same.old.token"),
-            RequestContext(**_CTX),
-            api_base_url=fake_server.api_base_url,
+            base_url=fake_server.access_url,
         )
         await client.get("/llms.txt")
         await client.get("/v1/factory/llm-docs/v1")

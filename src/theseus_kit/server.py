@@ -206,6 +206,7 @@ def create_mcp_server(settings: TheseusSettings | None = None) -> DesktopFastMCP
         verifier = _LazyOAuthTokenVerifier(
             authorization_server=cred.authorization_server,
             required_scope=cred.scopes,
+            robot_public_id=cred.robot_public_id,
             audience=resource_url,
         )
 
@@ -615,10 +616,12 @@ class _LazyOAuthTokenVerifier:
         self,
         authorization_server: str,
         required_scope: str,
+        robot_public_id: str | None = None,
         audience: str | None = None,
     ) -> None:
         self._authorization_server = authorization_server
         self._required_scope = required_scope
+        self._robot_public_id = robot_public_id
         self._audience = audience
         self._verifier: TheseusTokenVerifier | None = None
         self._lock = asyncio.Lock()
@@ -632,6 +635,7 @@ class _LazyOAuthTokenVerifier:
                     self._verifier = await build_token_verifier(
                         self._authorization_server,
                         required_scope=self._required_scope,
+                        robot_public_id=self._robot_public_id,
                         audience=self._audience,
                     )
         result: AccessToken | None = await self._verifier.verify_token(token)

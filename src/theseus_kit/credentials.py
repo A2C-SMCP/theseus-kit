@@ -12,22 +12,8 @@ from collections.abc import Sequence
 
 from tfrs_auth import PatCredential, Scope, robot_audience, scopes_to_str
 
-from .config import CredentialConfig, OAuthConfig, UserPatConfig
+from .config import CredentialConfig, OAuthConfig, UserPatConfig, parse_public_id
 from .errors import ConfigError
-
-
-def _parse_public_id(public_id: str, *, field_name: str) -> tuple[str, str]:
-    """Parse a ``{orgSlug}:{employeeNo}`` public_id into its two components.
-
-    The format is contractually defined by Manager's ``publicid`` module and
-    mirrored in tfrs-auth's ``contract.public_id()``.
-    """
-    if ":" not in public_id:
-        raise ConfigError(f"{field_name} must be in public_id format ({{orgSlug}}:{{employeeNo}}), got {public_id!r}")
-    org_slug, employee_no = public_id.rsplit(":", 1)
-    if not org_slug or not employee_no:
-        raise ConfigError(f"{field_name} has empty org_slug or employee_no: {public_id!r}")
-    return org_slug, employee_no
 
 
 def build_credential(
@@ -45,7 +31,10 @@ def build_credential(
     authorization. ``scopes`` is an optional explicit per-call override.
     """
     if isinstance(cred, UserPatConfig):
-        org_slug, employee_no = _parse_public_id(cred.robot_public_id, field_name="robot_public_id")
+        try:
+            org_slug, employee_no = parse_public_id(cred.robot_public_id)
+        except ValueError as exc:
+            raise ConfigError(f"robot_public_id is invalid: {exc}") from exc
         return PatCredential(
             pat=cred.pat.get_secret_value(),
             audience=robot_audience(org_slug, employee_no),

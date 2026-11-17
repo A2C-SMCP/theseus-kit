@@ -1,9 +1,10 @@
-"""Auth-aware httpx layer: Bearer + routing headers, with typed error mapping.
+"""Auth-aware httpx layer: Bearer-only, canonical robot base URL, typed errors.
 
-This is theseus-kit's own routing Transport (architecture layer 3). tfrs-auth's
-``BearerAuth`` is still a skeleton upstream, and — more importantly — theseus-kit
-must inject the three X-TF-* routing headers alongside the Bearer, which is a
-theseus-kit concern, not a generic auth one.
+The Operator gateway derives the tenant namespace from the request Host and the
+robot identity from ``/c/{robotType}/{robotId}``; theseus-kit no longer sends
+``X-TF-*`` routing headers.  The configured ``access_url`` is the full canonical
+base (Host + robot path), so ``/v1/factory/**`` / ``/llms.txt`` pass through the
+gateway unchanged.
 
 Two token-source paths converge here (§8 of the OAuth design):
 
@@ -13,7 +14,9 @@ Two token-source paths converge here (§8 of the OAuth design):
 
 Robot-side 401/403 surface as :class:`AuthRejectedError` (no silent refresh-
 retry: that needs an upstream ``AsyncCachingTokenSource.invalidate()``, tracked
-against tfrs-auth cnb#3). Token-exchange failures surface via
+against tfrs-auth cnb#3). A retained old Host returns 409
+``ROBOT_ADDRESS_CHANGED``; an unknown Host / robot-not-on-Host returns 404.
+Token-exchange failures surface via
 :func:`theseus_kit.errors.map_exchange_error`.
 """
 
@@ -30,10 +33,18 @@ from tfrs_auth.client import Token
 from tfrs_auth.errors import TfrsAuthError
 
 from .config import RobotTarget, TheseusSettings
-from .errors import AuthRejectedError, DraftNotFoundError, RobotApiError, RobotValidationError, map_exchange_error
+from .errors import (
+    AuthRejectedError,
+    DraftNotFoundError,
+    RobotAddressChangedError,
+    RobotApiError,
+    RobotPathRejectedError,
+    RobotRouteNotFoundError,
+    RobotValidationError,
+    map_exchange_error,
+)
 from .models import PaginatedList, TFSResponse, parse_tfs_response
 from .redaction import redact_secrets
-from .routing import RequestContext
 from .tokens import build_token_source
 
 _M = TypeVar("_M", bound=BaseModel)
@@ -81,21 +92,16 @@ class StaticTokenSource:
 
 
 class RobotAuth(httpx.Auth):
-    """httpx.Auth: inject ``Authorization: Bearer <jwt>`` + the X-TF-* headers.
+    """httpx.Auth: inject ``Authorization: Bearer <jwt>`` only.
 
-    Only :class:`tfrs_auth.errors.TfrsAuthError` from ``token()`` is mapped. The
-    user_pat credential's ``request_form()`` is a skeleton upstream (tfrs-auth
-    cnb#1); once it ships, broaden the guard so a non-TfrsAuthError failure
-    surfaces as a typed error instead of propagating raw.
+    The Operator gateway resolves namespace/robot from the Host + canonical
+    ``/c/{robotType}/{robotId}`` path; sending ``X-TF-*`` is obsolete and is
+    removed here.  Only :class:`tfrs_auth.errors.TfrsAuthError` from ``token()``
+    is mapped; any other failure propagates raw.
     """
 
-    def __init__(
-        self,
-        token_source: AsyncCachingTokenSource | StaticTokenSource,
-        context: RequestContext,
-    ) -> None:
+    def __init__(self, token_source: AsyncCachingTokenSource | StaticTokenSource) -> None:
         self._token_source = token_source
-        self._context = context
 
     async def async_auth_flow(self, request: httpx.Request) -> AsyncGenerator[httpx.Request, httpx.Response]:
         try:
@@ -103,34 +109,32 @@ class RobotAuth(httpx.Auth):
         except TfrsAuthError as exc:
             raise map_exchange_error(exc) from exc
         request.headers["Authorization"] = f"Bearer {token.access_token}"
-        for name, value in self._context.routing_headers().items():
-            request.headers[name] = value
         yield request
 
 
 class RobotClient:
     """Async HTTP client for a target TFRobotServer.
 
-    Authentication and routing are injected per-request via :class:`RobotAuth`;
-    callers never handle tokens or X-TF-* headers directly. Read-only helpers
-    cover #17's acceptance surface (``/llms.txt``, factory docs, read APIs); the
-    full adapter (TFSResponse mapping, pagination, write/publish) is #3.
+    *base_url* is the Manager-authoritative canonical robot base
+    (``https://{alias}/c/{robotType}/{robotId}/``); the gateway strips the
+    ``/c/...`` prefix before forwarding to TFRobotServer.  Authentication is
+    injected per-request via :class:`RobotAuth`; callers never handle tokens or
+    routing headers directly.
     """
 
     def __init__(
         self,
         token_source: AsyncCachingTokenSource | StaticTokenSource,
-        context: RequestContext,
         *,
-        api_base_url: str,
+        base_url: str,
         verify: bool | str = True,
         timeout_s: float = 30.0,
         headers: Mapping[str, str] | None = None,
     ) -> None:
         self._token_source = token_source
         self._client = httpx.AsyncClient(
-            base_url=api_base_url.rstrip("/"),
-            auth=RobotAuth(token_source, context),
+            base_url=base_url.rstrip("/"),
+            auth=RobotAuth(token_source),
             verify=verify,
             timeout=timeout_s,
             headers=dict(headers) if headers else {},
@@ -148,24 +152,18 @@ class RobotClient:
 
         ``http_client`` (if given) is used only for the token *exchange* with the
         Manager; robot requests always use a separate client built from
-        ``api_base_url``. ``clock`` is a test hook for deterministic expiry.
+        ``access_url``. ``clock`` is a test hook for deterministic expiry.
         """
         token_source = build_token_source(
             settings.credential,
-            manager_base_url=settings.robot.manager_base_url,
+            manager_base_url=settings.robot.manager_api_base_url,
             http_client=http_client,
             clock=clock,
-        )
-        context = RequestContext(
-            robot_id=settings.robot.robot_id,
-            namespace=settings.robot.namespace,
-            robot_type=settings.robot.robot_type,
         )
         verify: bool | str = str(settings.robot.ca_bundle) if settings.robot.ca_bundle else settings.robot.verify
         return cls(
             token_source,
-            context,
-            api_base_url=settings.robot.api_base_url,
+            base_url=settings.robot.access_url,
             verify=verify,
             timeout_s=settings.robot.timeout_s,
         )
@@ -183,10 +181,10 @@ class RobotClient:
 
         The *token* is the raw RS256 JWT validated by
         :class:`TheseusTokenVerifier` (S2). It is held in a
-        :class:`StaticTokenSource` and injected as a Bearer alongside X-TF-*
-        routing headers — no token exchange, caching, or refresh.
+        :class:`StaticTokenSource` and injected as a Bearer — no token exchange,
+        caching, or refresh.
 
-        *robot* provides the routing identity (X-TF-*) and the API base URL.
+        *robot* provides the Manager-authoritative ``access_url``.
 
         Callers SHOULD extract ``exp`` from the validated
         :class:`~mcp.server.auth.provider.AccessToken.claims` and pass it as
@@ -195,16 +193,10 @@ class RobotClient:
         expired token from a genuinely unauthorized one.
         """
         source = StaticTokenSource(access_token=token, scope=scope, expires_at=expires_at)
-        context = RequestContext(
-            robot_id=robot.robot_id,
-            namespace=robot.namespace,
-            robot_type=robot.robot_type,
-        )
         verify: bool | str = str(robot.ca_bundle) if robot.ca_bundle else robot.verify
         return cls(
             source,
-            context,
-            api_base_url=robot.api_base_url,
+            base_url=robot.access_url,
             verify=verify,
             timeout_s=robot.timeout_s,
         )
@@ -245,6 +237,10 @@ class RobotClient:
         path = f"/v1/factory/drafts/{setting_id}"
         try:
             response = await self.get(path)
+        except RobotRouteNotFoundError:
+            # Gateway-level 404 (unknown Host / robot not on this Host) must not
+            # be mistaken for a TFRobotServer draft-not-found.
+            raise
         except RobotApiError as exc:
             if exc.status_code == 404:
                 raise DraftNotFoundError(f"Draft {setting_id} not found (404).") from exc
@@ -422,6 +418,41 @@ class RobotClient:
         # Defense-in-depth: a caller could misuse `path` (e.g. embed a token as a
         # query string). Scrub PAT/JWT-shaped values so they never reach error text.
         safe_path = redact_secrets(path)
+        if 300 <= response.status_code < 400:
+            # A retained old Host may 302 page navigations; API requests should
+            # get 409, but never silently parse a redirect body as success.
+            raise RobotAddressChangedError(
+                f"robot entry redirected {safe_path} (HTTP {response.status_code}): "
+                "机器人地址已变更，请从 Manager 重新获取 accessURL 并更新 "
+                "THESEUS_ROBOT__ACCESS_URL。",
+                status_code=response.status_code,
+            )
+        if response.status_code == 404:
+            body_text = RobotClient._body_text(response)
+            if "unknown ingress host" in body_text or "robot not found on this host" in body_text:
+                raise RobotRouteNotFoundError(
+                    f"robot route not found for {safe_path} (HTTP 404): "
+                    "请确认 access_url 的 Host/alias、robotType、robotId 来自当前环境的 Manager，"
+                    "且 target robot 属于该 Host。",
+                    status_code=404,
+                )
+        if response.status_code == 409:
+            body_json = RobotClient._json_body(response)
+            if body_json.get("errorCode") == "ROBOT_ADDRESS_CHANGED":
+                raise RobotAddressChangedError(
+                    f"robot address changed for {safe_path} (HTTP 409): "
+                    "机器人地址已变更，请从 Manager 重新获取 accessURL（"
+                    "https://{alias}/c/tfrobot/{rid}/），更新 THESEUS_ROBOT__ACCESS_URL 后重启。"
+                    "旧地址仅保留 30 天。"
+                )
+        if response.status_code == 400:
+            body_text = RobotClient._body_text(response)
+            if "invalid robot" in body_text:
+                raise RobotPathRejectedError(
+                    f"robot path rejected for {safe_path} (HTTP 400): "
+                    "access_url 的 robotType/robotId 不合法或与网关路径规则不匹配。",
+                    status_code=400,
+                )
         if response.status_code == 401:
             raise AuthRejectedError(f"robot rejected {safe_path} (HTTP 401): 凭证无效、已过期或目标 Robot 不匹配。")
         if response.status_code == 403:
@@ -442,6 +473,21 @@ class RobotClient:
                 status_code=response.status_code,
             )
         return response
+
+    @staticmethod
+    def _json_body(response: httpx.Response) -> dict[str, Any]:
+        try:
+            body = response.json()
+        except ValueError:
+            return {}
+        return body if isinstance(body, dict) else {}
+
+    @staticmethod
+    def _body_text(response: httpx.Response) -> str:
+        try:
+            return response.text
+        except Exception:  # pragma: no cover - defensive only
+            return ""
 
     @staticmethod
     def _extract_422_message(response: httpx.Response) -> str:

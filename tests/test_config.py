@@ -13,8 +13,9 @@ def test_missing_error_type_expands_required_nested_fields() -> None:
     """Hint expansion keys off pydantic's stable error type, not message text."""
     hint = _env_hint_for(("robot",), "missing")
 
+    assert "THESEUS_ROBOT__ACCESS_URL" in hint
     assert "THESEUS_ROBOT__ROBOT_ID" in hint
-    assert "THESEUS_ROBOT__NAMESPACE" in hint
+    assert "THESEUS_ROBOT__MANAGER_API_BASE_URL" in hint
 
 
 def test_non_missing_error_does_not_expand_nested_fields() -> None:

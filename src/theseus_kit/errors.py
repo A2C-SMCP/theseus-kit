@@ -71,6 +71,33 @@ class RobotApiError(TheseusError):
         super().__init__(message)
 
 
+class RobotAddressChangedError(RobotApiError):
+    """The robot's authoritative Host/path changed (retained-alias 409 / 302).
+
+    The caller must rediscover the canonical ``accessURL`` from Manager and
+    update the configured ``THESEUS_ROBOT__ACCESS_URL``; retrying the old
+    address is not safe.  The old alias is retained for a limited window
+    (default 30 days) and then stops resolving.
+    """
+
+    def __init__(self, message: str, *, status_code: int = 409) -> None:
+        super().__init__(message, status_code=status_code)
+
+
+class RobotRouteNotFoundError(RobotApiError):
+    """Gateway could not resolve the Host/robot path (unknown Host, robot not on Host)."""
+
+    def __init__(self, message: str, *, status_code: int = 404) -> None:
+        super().__init__(message, status_code=status_code)
+
+
+class RobotPathRejectedError(RobotApiError):
+    """Gateway rejected the robot path/identity as malformed (HTTP 400)."""
+
+    def __init__(self, message: str, *, status_code: int = 400) -> None:
+        super().__init__(message, status_code=status_code)
+
+
 class ConfigLocatorError(TheseusError):
     """The supplied locator string is malformed or references an unknown state."""
 

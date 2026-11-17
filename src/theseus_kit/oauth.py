@@ -101,6 +101,7 @@ def _claims_to_dict(claims: Claims) -> dict[str, Any]:
 async def build_token_verifier(
     authorization_server: str,
     *,
+    robot_public_id: str | None = None,
     audience: str | None = None,
     required_scope: str | None = None,
     http_client: httpx.AsyncClient | None = None,
@@ -112,10 +113,13 @@ async def build_token_verifier(
     then builds a ``TheseusTokenVerifier`` wired to that JWKS endpoint.
 
     Args:
-        authorization_server: TFRSManager OAuth AS base URL (e.g.
-            ``https://manager.example.com``).
-        audience: Expected ``aud`` claim (theseus-kit PRM resource URL).
-            ``None`` skips audience validation (lenient, for development).
+        authorization_server: TFRSManager OAuth AS issuer/base URL.
+        robot_public_id: Target robot ``{orgSlug}:{employeeNo}``.  When set,
+            the expected audience is ``{issuer}/robots/{robot_public_id}``
+            (TFRM-760 Authorization Code profile).
+        audience: Explicit expected ``aud`` claim; used only when
+            *robot_public_id* is not provided.  ``None`` skips audience
+            validation (lenient, for development).
         required_scope: Scope required for token acceptance (e.g.
             ``"config:read"``). ``None`` skips scope enforcement.
         http_client: External ``httpx.AsyncClient``; created internally if
@@ -126,6 +130,8 @@ async def build_token_verifier(
         ``token_verifier`` injection.
     """
     as_meta = await fetch_as_metadata(authorization_server, http_client=http_client)
+    if robot_public_id is not None:
+        audience = f"{as_meta.issuer.rstrip('/')}/robots/{robot_public_id}"
     return TheseusTokenVerifier(
         jwks_url=as_meta.jwks_uri,
         issuer=as_meta.issuer,

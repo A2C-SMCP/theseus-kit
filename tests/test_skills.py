@@ -50,16 +50,15 @@ _ALL_SKILL_NAMES = (*_NEW_SKILLS, *_LEGACY_ALIASES)
 def _settings() -> TheseusSettings:
     return TheseusSettings(
         robot={
+            "access_url": "https://localhost:1/c/tfrobot/test-robot/",
             "robot_id": "test-robot",
-            "namespace": "default",
             "robot_type": "tfrobot",
-            "api_base_url": "https://localhost:1",
-            "manager_base_url": "https://localhost:1",
+            "manager_api_base_url": "https://localhost:1",
         },
         credential={
             "kind": "user_pat",
             "pat": SecretStr("tfp_test_pat"),
-            "robot_public_id": "test:1",
+            "robot_public_id": "test:10001",
         },
     )
 

@@ -24,7 +24,7 @@
 
 ```bash
 # 安装正式发行包
-uv tool install "theseus-kit==0.1.1"
+uv tool install "theseus-kit==0.2.0"
 
 # 完成下方配置后，启动 MCP 服务器（stdio 传输）
 theseus-kit
@@ -35,22 +35,21 @@ theseus-kit
 通过环境变量或 `.env` 文件配置目标机器人和凭证：
 
 ```bash
-# 机器人路由信息
-export THESEUS_ROBOT__ROBOT_ID="my-robot"
-export THESEUS_ROBOT__NAMESPACE="default"
+# 机器人权威入口（从 Manager connection-info 的 accessURL 复制）
+export THESEUS_ROBOT__ACCESS_URL="https://acme.test.turingfocus.cn/c/tfrobot/robot-1/"
+export THESEUS_ROBOT__ROBOT_ID="robot-1"
 export THESEUS_ROBOT__ROBOT_TYPE="tfrobot"
-export THESEUS_ROBOT__API_BASE_URL="https://api.example.com"
-export THESEUS_ROBOT__MANAGER_BASE_URL="https://manager.example.com"
+export THESEUS_ROBOT__MANAGER_API_BASE_URL="https://rest.test.turingfocus.cn"
 
 # 用户个人令牌（stdio 入口使用此方式）
 export THESEUS_CREDENTIAL__KIND="user_pat"
 export THESEUS_CREDENTIAL__PAT="tfp_xxx"
-export THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID="myorg:000042"
+export THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID="turingfocus:EMP010-R"
 # 可选：显式缩窄短 Token；不设置时默认申请以下三个配置 scope
 export THESEUS_CREDENTIAL__SCOPES="config:read config:write config:publish"
 ```
 
-`0.1.1` 的默认命令行入口通过 stdio 运行，支持用户 PAT 换发。无 PAT 的 stdio OAuth
+`0.2.0` 的默认命令行入口通过 stdio 运行，支持用户 PAT 换发。无 PAT 的 stdio OAuth
 外部回调登录尚未实现；HTTP OAuth 的服务端集成见 [OAuth 运行手册](docs/oauth-operations.md)。
 
 ## MCP 工具
@@ -139,7 +138,7 @@ theseus-kit 通过 `skill://` 资源暴露 **12 个中文技能指南**，为 LL
 
 ```
 配置的凭证 → Manager 换发端点 → 短 JWT（aud=robot:{public_id}）
-→ 注入 X-TF-* 路由头 → 调用 TFRobotServer
+→ Bearer + 权威 accessURL（Host + /c/tfrobot/{rid}）→ 调用 TFRobotServer
 ```
 
 这是**确定性最强**的模式：凭证固定，无需浏览器交互，适合自动化 / CI / 后台场景。
@@ -150,13 +149,17 @@ theseus-kit 通过 `skill://` 资源暴露 **12 个中文技能指南**，为 LL
 
 ```
 MCP Client → TFRSManager AS（Authorization Code + PKCE）
-→ OAuth AS token（aud={issuer}/robots/<id>, typ=at+jwt）
+→ OAuth AS token（aud={issuer}/robots/{public_id}, typ=at+jwt）
 → theseus-kit 校验（tfrs-auth RS256 + JWKS + scope）
 → 直传 TFRobotServer（无需换发）
 ```
 
 HTTP 集成适合交互式使用。默认 `theseus-kit` 命令仅启动 stdio；其无 PAT OAuth
 外部回调登录尚未实现，不能用下面的 stdio 客户端配置启用 HTTP OAuth。
+
+> **OAuth 验收状态**：TFRM-760 已修复 Authorization Code 的 audience/typ；但 MCP SDK
+> Topology A 的 PRM `resource` 与 Manager robot resource 的兼容性仍需真实 test 环境验收。
+> 验收前 `0.2.0` 只保证 user_pat；不要把 OAuth 作为生产可用能力。
 
 > **凭证选择**：`THESEUS_CREDENTIAL__KIND` 显式选择 `user_pat` 或 `oauth`。
 > 配置错误不会静默降级，而是抛出明确的 `ConfigError`。
@@ -170,16 +173,15 @@ HTTP 集成适合交互式使用。默认 `theseus-kit` 命令仅启动 stdio；
   "mcpServers": {
     "theseus-kit": {
       "command": "uvx",
-      "args": ["--from", "theseus-kit==0.1.1", "theseus-kit"],
+      "args": ["--from", "theseus-kit==0.2.0", "theseus-kit"],
       "env": {
-        "THESEUS_ROBOT__ROBOT_ID": "my-robot",
-        "THESEUS_ROBOT__NAMESPACE": "default",
+        "THESEUS_ROBOT__ACCESS_URL": "https://acme.test.turingfocus.cn/c/tfrobot/robot-1/",
+        "THESEUS_ROBOT__ROBOT_ID": "robot-1",
         "THESEUS_ROBOT__ROBOT_TYPE": "tfrobot",
-        "THESEUS_ROBOT__API_BASE_URL": "https://api.example.com",
-        "THESEUS_ROBOT__MANAGER_BASE_URL": "https://manager.example.com",
+        "THESEUS_ROBOT__MANAGER_API_BASE_URL": "https://rest.test.turingfocus.cn",
         "THESEUS_CREDENTIAL__KIND": "user_pat",
         "THESEUS_CREDENTIAL__PAT": "tfp_xxx",
-        "THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID": "myorg:000042",
+        "THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID": "turingfocus:EMP010-R",
         "THESEUS_CREDENTIAL__SCOPES": "config:read config:write config:publish"
       }
     }
@@ -230,7 +232,7 @@ theseus-kit 支持**两条凭证路径**，在 `RobotClient` 层自然收敛：
 UserPatConfig
   → build_credential()           # 构造 tfrs-auth PatCredential
   → AsyncCachingTokenSource      # token-exchange + 缓存 + single-flight + 临期刷新 + 退避
-  → RobotAuth                    # 注入 Authorization: Bearer <jwt> + X-TF-*
+  → RobotAuth                    # 注入 Authorization: Bearer <jwt>
   → TFRobotServer
 ```
 
@@ -242,8 +244,8 @@ OAuthConfig
   → RFC 8414 AS 发现             # fetch_as_metadata() → jwks_uri + issuer
   → 校验: RS256 + scope + exp    # JwtVerifier.verify(required_scope=)
   → StaticTokenSource            # 静态持有已验 token，不换发
-  → RobotAuth                    # 注入 Authorization: Bearer + X-TF-*
-  → TFRobotServer                # 原生接受 aud={issuer}/robots/<id> + typ=at+jwt
+  → RobotAuth                    # 注入 Authorization: Bearer
+  → TFRobotServer                # 原生接受 aud={issuer}/robots/{public_id} + typ=at+jwt
 ```
 
 #### 两条路径对比
@@ -266,10 +268,11 @@ OAuthConfig
    → ConfigReader(robot_id=...).get_detail(client, locator, depth, max_bytes)
 
 3. RobotClient.from_settings(settings)
-   → RobotAuth(token_source, context).async_auth_flow()
+   → RobotAuth(token_source).async_auth_flow()
      → token_source.token() 获取 Bearer（换发或静态）
-     → context.routing_headers() 获取 X-TF-Namespace / X-TF-RobotId / X-TF-RobotType
-   → httpx.AsyncClient 发送 GET 请求到 TFRobotServer
+     → 只注入 Authorization: Bearer
+   → httpx.AsyncClient(base_url=access_url) 发送 GET 到网关
+   → Operator 按 Host 定 namespace、按 /c/tfrobot/{rid} 定 robot，剥前缀后投给 TFRobotServer
 
 4. TFRobotServer 响应的 JSON 被反序列化为 TFSResponse[ConfigDetail]
    → code / message / data 信封解包
@@ -294,11 +297,11 @@ OAuthConfig
 |------|------|
 | `server.py` | FastMCP 组合根，工具/资源注册，OAuth PRM 路由 |
 | `config.py` | `TheseusSettings`（pydantic-settings），两种凭证配置的判别联合 |
-| `transport.py` | `RobotClient` + `RobotAuth`（Bearer + X-TF-* 注入）+ `StaticTokenSource` |
+| `transport.py` | `RobotClient` + `RobotAuth`（Bearer-only）+ `StaticTokenSource` |
 | `oauth.py` | `TheseusTokenVerifier`（tfrs-auth → MCP SDK 适配）+ RFC 8414 发现 |
 | `tokens.py` | `build_token_source()` — `AsyncCachingTokenSource` 组装 |
 | `credentials.py` | `build_credential()` — user_pat → tfrs-auth PatCredential |
-| `routing.py` | `RequestContext` — X-TF-* 头部构建与校验 |
+| `routing.py` | `RobotAddress` — 权威 accessURL（`/c/{type}/{id}`）校验 |
 | `errors.py` | 类型化异常层级 + `map_exchange_error()` |
 | `redaction.py` | 令牌脱敏最后防线（PAT / JWT / OAuth token / code / state） |
 | `models.py` | `TFSResponse[T]` 信封 + 渐进披露数据模型 |
@@ -320,11 +323,10 @@ uv run poe test-cov             # 测试覆盖率（需要 ≥80%）
 
 ```bash
 THESEUS_E2E=1 \
+THESEUS_ROBOT__ACCESS_URL=https://<alias>/c/tfrobot/<rid>/ \
 THESEUS_ROBOT__ROBOT_ID=<rid> \
-THESEUS_ROBOT__NAMESPACE=<ns> \
 THESEUS_ROBOT__ROBOT_TYPE=tfrobot \
-THESEUS_ROBOT__API_BASE_URL=https://api.<clusterDomain> \
-THESEUS_ROBOT__MANAGER_BASE_URL=https://<manager-host> \
+THESEUS_ROBOT__MANAGER_API_BASE_URL=https://<manager-machine-api-origin> \
 THESEUS_CREDENTIAL__KIND=user_pat \
 THESEUS_CREDENTIAL__PAT=<tfp_...> \
 THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID=<orgSlug>:<employeeNo> \

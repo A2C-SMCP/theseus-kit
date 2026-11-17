@@ -123,11 +123,10 @@ def fake_robot() -> Iterator[FakeRobotServer]:
 def kit_env(signaling_endpoint: str, fake_robot: FakeRobotServer, monkeypatch: pytest.MonkeyPatch) -> None:
     """Export THESEUS_* settings for the kit subprocess (inherits parent env)."""
     base = fake_robot.base_url
+    monkeypatch.setenv("THESEUS_ROBOT__ACCESS_URL", fake_robot.access_url)
     monkeypatch.setenv("THESEUS_ROBOT__ROBOT_ID", "e2e-robot")
-    monkeypatch.setenv("THESEUS_ROBOT__NAMESPACE", "e2e-ns")
     monkeypatch.setenv("THESEUS_ROBOT__ROBOT_TYPE", "tfrobot")
-    monkeypatch.setenv("THESEUS_ROBOT__API_BASE_URL", base)
-    monkeypatch.setenv("THESEUS_ROBOT__MANAGER_BASE_URL", base)
+    monkeypatch.setenv("THESEUS_ROBOT__MANAGER_API_BASE_URL", base)
     monkeypatch.setenv("THESEUS_CREDENTIAL__KIND", "user_pat")
     monkeypatch.setenv("THESEUS_CREDENTIAL__PAT", "tfp_e2e_test_pat")
     monkeypatch.setenv("THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID", "e2eorg:10001")
