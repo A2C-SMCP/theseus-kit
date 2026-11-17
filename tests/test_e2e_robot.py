@@ -6,11 +6,10 @@ the network, so it is gated: it skips unless ``THESEUS_E2E=1`` is set and the
 ``THESEUS_*`` settings resolve. Run with::
 
     THESEUS_E2E=1 \\
+    THESEUS_ROBOT__ACCESS_URL=https://<alias>/c/tfrobot/<rid>/ \\
     THESEUS_ROBOT__ROBOT_ID=<rid> \\
-    THESEUS_ROBOT__NAMESPACE=<ns> \\
-    THESEUS_ROBOT__ROBOT_TYPE=<tfrobot|openclaw|...> \\
-    THESEUS_ROBOT__API_BASE_URL=https://api.<clusterDomain> \\
-    THESEUS_ROBOT__MANAGER_BASE_URL=https://<manager-host> \\
+    THESEUS_ROBOT__ROBOT_TYPE=tfrobot \\
+    THESEUS_ROBOT__MANAGER_API_BASE_URL=https://<manager-machine-api-origin> \\
     THESEUS_CREDENTIAL__KIND=user_pat \\
     THESEUS_CREDENTIAL__PAT=<tfp_...> \\
     THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID=<orgSlug>:<employeeNo> \\
@@ -51,5 +50,5 @@ async def test_real_robot_read_paths() -> None:
             response = await client.get(read_api)
             assert response.status_code == 200, f"{read_api} -> {response.status_code}"
 
-    # Reaching here means the exchange, header injection, and routing contract
-    # all held against the real Manager + robot (AC #1 for /llms.txt).
+    # Reaching here means the exchange, Bearer injection, and canonical routing
+    # contract all held against the real Manager + robot (AC #1 for /llms.txt).

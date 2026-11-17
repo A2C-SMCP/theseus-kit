@@ -47,16 +47,15 @@ def _settings(fake: FakeRobotServer) -> TheseusSettings:
     """Build minimal settings pointing at *fake*."""
     return TheseusSettings(
         robot={
+            "access_url": fake.access_url,
             "robot_id": "robot-1",
-            "namespace": "default",
             "robot_type": "tfrobot",
-            "api_base_url": fake.api_base_url,
-            "manager_base_url": fake.manager_base_url,
+            "manager_api_base_url": fake.manager_api_base_url,
         },
         credential={
             "kind": "user_pat",
             "pat": SecretStr("tfp_test_pat"),
-            "robot_public_id": "turingfocus:000042",
+            "robot_public_id": "turingfocus:EMP010-R",
         },
     )
 

@@ -48,9 +48,8 @@ async def main() -> None:
         fail("Setup", f"Cannot load settings: {exc}")
 
     print(f"  robot_id:     {settings.robot.robot_id}")
-    print(f"  namespace:    {settings.robot.namespace}")
     print(f"  robot_type:   {settings.robot.robot_type}")
-    print(f"  api_base_url: {settings.robot.api_base_url}")
+    print(f"  access_url:   {settings.robot.access_url}")
     print(f"  credential:   kind={settings.credential.kind}")
     ok()
 

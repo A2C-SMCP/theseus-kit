@@ -5,6 +5,38 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [PEP 440](https://peps.python.org/pep-0440/) 与语义化版本意图。
 
+## [0.2.0] — 2026-11-17
+
+### Breaking
+
+- 机器人路由切换到 Manager 权威 `accessURL`（`https://{alias}/c/tfrobot/{rid}/`）：
+  `THESEUS_ROBOT__ACCESS_URL` + `THESEUS_ROBOT__ROBOT_ID` + `THESEUS_ROBOT__MANAGER_API_BASE_URL`。
+  移除 `THESEUS_ROBOT__NAMESPACE`、`THESEUS_ROBOT__API_BASE_URL`、`THESEUS_ROBOT__MANAGER_BASE_URL`。
+- 删除 `X-TF-*` 路由头注入；`RobotAuth` 只发送 `Authorization: Bearer`，`RequestContext` 由
+  `RobotAddress` 取代。
+- `RobotClient` 构造函数改为 `base_url=access_url`；`api_base_url` 参数移除。
+- OAuth `OAuthConfig` 新增必填 `robot_public_id`；期望 audience 改为
+  `{issuer}/robots/{public_id}`（TFRM-760），不再使用 `resource_server_url` 作为 audience。
+
+### Added
+
+- 网关错误类型化：409 `ROBOT_ADDRESS_CHANGED` → `RobotAddressChangedError`；404 未知 Host /
+  robot-not-on-Host → `RobotRouteNotFoundError`；400 路径非法 → `RobotPathRejectedError`；
+  3xx 显式按地址变更处理。
+- `public_id` 按 Manager 契约按首个冒号解析，允许 `EMP010-R` 等合法 employeeNo。
+- 升级调研报告 `docs/upgrade-plan-robot-address-v2.md`。
+
+### Fixed
+
+- 合法 public_id（含连字符/冒号）不再被配置正则拒绝。
+- 旧路由字段/环境变量会给出明确的迁移错误，而不是静默请求旧入口。
+
+### Known limitations
+
+- OAuth Topology A 的 MCP PRM `resource` 与 Manager robot resource 的兼容性仍需真实环境验收；
+  验收前 `0.2.0` 只保证 user_pat。
+- staging/prod 若仍部署旧 Operator/Manager，需等环境升级或临时使用旧版本 theseus-kit。
+
 ## [0.1.1] — 2026-10-04
 
 ### Fixed

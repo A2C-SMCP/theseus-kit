@@ -22,13 +22,11 @@ from theseus_kit import (
     RobotValidationError,
     UserPatConfig,
 )
-from theseus_kit.routing import RequestContext
 from theseus_kit.services.draft_creator import DraftCreator
 from theseus_kit.tokens import build_token_source
 
 from ._fakeserver import FakeRobotServer, RobotResponse
 
-_CTX = dict(robot_id="robot-1", namespace="default", robot_type="tfrobot")
 _ROBOT_ID = "robot-1"
 _CREATE_PATH = "/v1/factory/drafts"
 
@@ -47,12 +45,10 @@ def _client(fake: FakeRobotServer) -> RobotClient:
         pat=SecretStr("tfp_test_pat"),
         robot_public_id="turingfocus:000042",
     )
-    token_source = build_token_source(cred, manager_base_url=fake.manager_base_url)
-    context = RequestContext(**_CTX)
+    token_source = build_token_source(cred, manager_base_url=fake.manager_api_base_url)
     return RobotClient(
         token_source,
-        context,
-        api_base_url=fake.api_base_url,
+        base_url=fake.access_url,
     )
 
 
@@ -163,7 +159,7 @@ async def test_create_draft_sends_robot_api_contract_payload(fake: FakeRobotServ
     # Find the create request
     create_req = None
     for req in fake.requests:
-        if req.method == "POST" and req.path == _CREATE_PATH:
+        if req.method == "POST" and fake.path_key(req.path) == _CREATE_PATH:
             create_req = req
             break
     assert create_req is not None
@@ -189,7 +185,7 @@ async def test_create_draft_null_config_sends_empty_object(fake: FakeRobotServer
 
     create_req = None
     for req in fake.requests:
-        if req.method == "POST" and req.path == _CREATE_PATH:
+        if req.method == "POST" and fake.path_key(req.path) == _CREATE_PATH:
             create_req = req
             break
     assert create_req is not None

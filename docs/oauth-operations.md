@@ -18,11 +18,10 @@ variant，同一时刻只有一种凭证生效。
 
 ```bash
 # 用户 PAT → Manager token-exchange 换发 robot-scoped JWT
-THESEUS_ROBOT__ROBOT_ID=my-robot
-THESEUS_ROBOT__NAMESPACE=default
+THESEUS_ROBOT__ROBOT_ID=robot-1
 THESEUS_ROBOT__ROBOT_TYPE=tfrobot
-THESEUS_ROBOT__API_BASE_URL=https://api.example.com
-THESEUS_ROBOT__MANAGER_BASE_URL=https://manager.example.com
+THESEUS_ROBOT__ACCESS_URL=https://acme.test.turingfocus.cn/c/tfrobot/robot-1/
+THESEUS_ROBOT__MANAGER_API_BASE_URL=https://rest.test.turingfocus.cn
 THESEUS_CREDENTIAL__KIND=user_pat
 THESEUS_CREDENTIAL__PAT=tfp_xxxxxxxx
 THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID=myorg:12345
@@ -34,15 +33,15 @@ THESEUS_CREDENTIAL__SCOPES=config:read config:write config:publish
 
 ```bash
 # OAuth 模式：kind=oauth，由 MCP Client 驱动授权
-# authorization_server 和 manager_base_url 可指向同一 TFRSManager 实例，但用途不同：
-#  — manager_base_url：PAT 路径的 Manager 换发端点（OAuth 路径不使用，但 RobotTarget 字段必填）
-#  — authorization_server：AS 元数据发现 + JWKS 公钥获取
-THESEUS_ROBOT__ROBOT_ID=my-robot
-THESEUS_ROBOT__NAMESPACE=default
+# authorization_server 和 manager_api_base_url 可指向同一 TFRSManager 实例，但用途不同：
+#  — manager_api_base_url：Manager 机器 API origin（token-exchange / 发现）
+#  — authorization_server：OAuth AS issuer（元数据发现 + JWKS）
+THESEUS_ROBOT__ROBOT_ID=robot-1
 THESEUS_ROBOT__ROBOT_TYPE=tfrobot
-THESEUS_ROBOT__API_BASE_URL=https://api.example.com
-THESEUS_ROBOT__MANAGER_BASE_URL=https://manager.example.com
+THESEUS_ROBOT__ACCESS_URL=https://acme.test.turingfocus.cn/c/tfrobot/robot-1/
+THESEUS_ROBOT__MANAGER_API_BASE_URL=https://rest.test.turingfocus.cn
 THESEUS_CREDENTIAL__KIND=oauth
+THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID=myorg:12345
 THESEUS_CREDENTIAL__AUTHORIZATION_SERVER=https://manager.example.com
 THESEUS_CREDENTIAL__SCOPES=config:read config:write
 THESEUS_CREDENTIAL__RESOURCE_SERVER_URL=https://theseus.example.com
@@ -54,7 +53,7 @@ THESEUS_CREDENTIAL__RESOURCE_SERVER_URL=https://theseus.example.com
 | `scopes` | 否 | 空格分隔的 scope 列表，默认 `config:read` |
 | `client_id` | 否 | 预注册的 client_id，留空走 DCR / CIMD（MCP SDK 自动处理） |
 | `redirect_uri` | 否 | STDIO 外部回调 URI（Topology B，尚未实现） |
-| `resource_server_url` | 否 | theseus-kit HTTP 入口地址，用于 token audience 校验；留空跳过 |
+| `resource_server_url` | 否 | theseus-kit MCP RS/PRM URL；**不是 token audience**（OAuth audience 是 `{issuer}/robots/{public_id}`） |
 
 ## 登录流程（Topology A — MCP Client 驱动）
 
@@ -86,8 +85,8 @@ VS Code MCP 扩展等）。
    本地校验：签名、`iss`、`aud`、scope、过期。校验通过后提取用户身份（`sub`）。
 
 7. **令牌直传**：校验后的 token 经 `StaticTokenSource` 注入 `RobotAuth`，
-   作为 Bearer 随 `X-TF-*` 路由头转发给 TFRobotServer。TFRobotServer 原生接受
-   `aud={issuer}/robots/{id}` + `typ=at+jwt` 格式，无需 theseus-kit 侧换发。
+   作为 Bearer 随 canonical `access_url` 转发给 TFRobotServer。TFRobotServer 原生接受
+   `aud={issuer}/robots/{public_id}` + `typ=at+jwt` 格式，无需 theseus-kit 侧换发。
 
 ### 架构一览
 
@@ -100,7 +99,7 @@ MCP Client                    theseus-kit (RS)              TFRobotServer
     │                        TheseusTokenVerifier                │
     │                        (RS256 + JWKS 本地校验)              │
     │                              │                              │
-    │                              ├─ Bearer + X-TF-* ───────▶   │
+    │                              ├─ Bearer + accessURL ─────▶   │
     │                              │                        (验签+scope)
     │                              │◀── 响应 ────────────────   │
     │◀── 结果 ───────────────────  │                              │
@@ -109,6 +108,9 @@ MCP Client                    theseus-kit (RS)              TFRobotServer
 **关键特性**：
 - theseus-kit **不做 token 换发**，OAuth AS token 直传机器人
 - token 校验在 theseus-kit 进程内完成（RS256 + JWKS），不依赖 AS 内省端点
+- **验收限制**：MCP SDK Topology A 会把 PRM `resource_server_url` 作为 RFC 8707
+  `resource` 发给 Manager，而 Manager AS 只接受 robot resource；真实验收前不要把 OAuth
+  作为生产可用能力，`0.2.0` 只保证 user_pat。
 - 缓存/刷新由 MCP Client 侧（MCP SDK）负责
 - `StaticTokenSource` 持有已验 token，不做换发/缓存/刷新
 
@@ -164,7 +166,7 @@ STDIO 模式下 MCP Client 无 HTTP 能力，theseus-kit 需自驱授权：
 | `ExchangeUnavailableError` | `[PAT]` | TFRSManager 换发端点不可达 | 检查网络连接 + `manager_base_url` 配置；稍后重试 |
 | OAuth 授权页面打不开 | `[OAuth]` | TFRSManager AS 不可达 | 确认 `authorization_server` URL 正确 |
 | JWKS 获取失败 | `[OAuth]` | AS 发现返回的 `jwks_uri` 不可达 | 检查 AS 配置；确认 theseus-kit 可访问 `jwks_uri` |
-| `RoutingConfigError` | `[通用]` | `robot_id`/`namespace`/`robot_type` 值不合法 | 确认值仅含小写字母、数字、连字符 `^[a-z0-9-]+$` |
+| `RoutingConfigError` | `[通用]` | `access_url` 不是合法的 `/c/{type}/{id}` 权威地址 | 从 Manager 复制 `accessURL`，确认 Host/robotType/robotId 一致 |
 
 ### 调试技巧
 

@@ -34,11 +34,10 @@ def test_main_uses_portable_stdio_transport(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(FastMCP, "run", fake_run)
     for name, value in {
+        "THESEUS_ROBOT__ACCESS_URL": "https://localhost:1/c/tfrobot/test-robot/",
         "THESEUS_ROBOT__ROBOT_ID": "test-robot",
-        "THESEUS_ROBOT__NAMESPACE": "test-ns",
         "THESEUS_ROBOT__ROBOT_TYPE": "tfrobot",
-        "THESEUS_ROBOT__API_BASE_URL": "https://localhost:1",
-        "THESEUS_ROBOT__MANAGER_BASE_URL": "https://localhost:1",
+        "THESEUS_ROBOT__MANAGER_API_BASE_URL": "https://localhost:1",
         "THESEUS_CREDENTIAL__KIND": "user_pat",
         "THESEUS_CREDENTIAL__PAT": "tfp_test_pat",
         "THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID": "testorg:10001",
@@ -52,14 +51,14 @@ def test_create_mcp_server_with_oauth() -> None:
     """create_mcp_server(settings) wires OAuth auth + token_verifier."""
     settings = TheseusSettings(
         robot=RobotTarget(
+            access_url="https://acme.test.turingfocus.cn/c/tfrobot/test-robot/",
             robot_id="test-robot",
-            namespace="test-ns",
             robot_type="tfrobot",
-            api_base_url="https://api.example.com",
-            manager_base_url="https://manager.example.com",
+            manager_api_base_url="https://manager.example.com",
         ),
         credential=OAuthConfig(
             authorization_server="https://auth.example.com",
+            robot_public_id="turingfocus:EMP010-R",
             scopes="config:read config:write",
             resource_server_url="https://theseus.example.com",
         ),

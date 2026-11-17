@@ -1,52 +1,151 @@
-"""Configuration: robot routing target + credential, loaded from env or a file.
+"""Configuration: robot access address + credential, loaded from env or a file.
 
 Routing metadata is **explicit** (config-injected), never discovered from
 Manager — editing a specific robot inherently requires declaring which one, and
 embedded/internal deployments inject these values externally.
 
-Credentials default to ``user_pat`` — the user's personal access token is
-exchanged for a robot-scoped JWT via Manager's token-exchange endpoint.
-All secret fields are pydantic ``SecretStr`` so default ``repr`` / logs never expose
-them.
+The robot address is the Manager-authoritative canonical URL::
+
+    https://{alias}/c/{robotType}/{robotId}/
+
+Manager's machine API origin (token exchange / discovery) is configured
+separately as ``manager_api_base_url``; it is *not* the JWT issuer and *not*
+the robot entry.  Credentials default to ``user_pat`` — the user's personal
+access token is exchanged for a robot-scoped JWT via Manager's token-exchange
+endpoint.  All secret fields are pydantic ``SecretStr`` so default ``repr`` /
+logs never expose them.
 """
 
 from __future__ import annotations
 
+import os
+import re
 from pathlib import Path
 from types import UnionType
 from typing import Annotated, Literal, Union, get_args, get_origin
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, Field, SecretStr, ValidationError, field_validator
+from pydantic import BaseModel, Field, SecretStr, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .redaction import redact_secrets
 
 _THESEUS_CONFIG_SCOPES = frozenset({"config:read", "config:write", "config:publish"})
 
+#: Manager public_id org slug contract (publicid.ParseAccountIdentity).
+_ORG_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$")
+#: Canonical robot path emitted by Manager domainalias.RobotPath / RobotURL.
+_ROBOT_PATH_RE = re.compile(r"^/c/(?P<robot_type>tfrobot|openclaw)/(?P<robot_id>[a-z0-9-]+)/?$")
+#: `rid` must be usable both as a gateway path segment and a K8s Service suffix.
+_ROBOT_ID_RE = re.compile(r"^[a-z0-9-]+$")
+
+_LEGACY_ROBOT_KEYS = frozenset({"api_base_url", "manager_base_url", "namespace"})
+_LEGACY_ROBOT_ENV = (
+    "THESEUS_ROBOT__API_BASE_URL",
+    "THESEUS_ROBOT__MANAGER_BASE_URL",
+    "THESEUS_ROBOT__NAMESPACE",
+)
+_LEGACY_CONFIG_HINT = (
+    "旧路由字段已退役：请改用 THESEUS_ROBOT__ACCESS_URL "
+    "(https://{alias}/c/tfrobot/{rid}/)、THESEUS_ROBOT__ROBOT_ID 和 "
+    "THESEUS_ROBOT__MANAGER_API_BASE_URL；不要再用 api.<clusterDomain>/X-TF。"
+)
+
+
+def parse_public_id(value: str) -> tuple[str, str]:
+    """Parse Manager's ``{orgSlug}:{employeeNo}`` public_id.
+
+    Manager/TFRobotServer split on the **first** colon; employeeNo may contain
+    ``:``, ``-`` and other non-whitespace characters (e.g. ``EMP010-R``).
+    """
+    org_slug, sep, employee_no = value.partition(":")
+    if not sep or not org_slug or not employee_no:
+        raise ValueError(f"public_id must be '{{orgSlug}}:{{employeeNo}}', got {value!r}")
+    if not _ORG_SLUG_RE.fullmatch(org_slug):
+        raise ValueError(f"public_id org_slug is invalid: {org_slug!r}")
+    if any(ch.isspace() or ord(ch) < 32 for ch in employee_no):
+        raise ValueError(f"public_id employee_no contains whitespace/control characters: {value!r}")
+    return org_slug, employee_no
+
+
+def _validate_public_id_value(value: str) -> str:
+    parse_public_id(value)
+    return value
+
 
 class RobotTarget(BaseModel):
-    """One target robot's routing identity + endpoints + TLS.
+    """One target robot's canonical address, Manager API origin, and TLS.
 
-    None of these is the token ``audience``: the ``audience`` is a credential
-    concern (``robot:{public_id}``) derived from the credential config. The
-    ``rid`` here is the ``X-TF-RobotId`` value — a different identifier.
+    ``access_url`` is the Manager-authoritative ``accessURL``
+    (``https://{alias}/c/{robotType}/{robotId}/``).  theseus-kit appends
+    ``/v1/factory/**`` / ``/llms.txt`` to it; the Operator strips
+    ``/c/{robotType}/{robotId}`` before forwarding to TFRobotServer.
+
+    The token ``audience`` is a credential concern (``robot:{public_id}`` for
+    user_pat, ``{issuer}/robots/{public_id}`` for OAuth).  ``robot_id`` here is
+    the business Robot ID (rid) used in the path — a different identifier.
     """
 
-    robot_id: str = Field(description="rid → X-TF-RobotId 与集群内路由（≠ public_id）")
-    namespace: str = Field(description="租户 K8s Namespace → X-TF-Namespace")
-    robot_type: str = Field(description="机器人类型（如 tfrobot / openclaw）→ X-TF-RobotType")
-    api_base_url: str = Field(description="机器人 HTTP 入口 https://api.<clusterDomain>")
-    manager_base_url: str = Field(description="TFRSManager 公共入口（POST /api/v1/oauth/token 的 host）")
+    access_url: str = Field(description="Manager 权威 accessURL：https://{alias}/c/{robotType}/{robotId}/")
+    robot_id: str = Field(
+        min_length=6,
+        max_length=30,
+        pattern=r"^[a-z0-9-]+$",
+        description="业务 Robot ID（rid），必须与 access_url 路径一致",
+    )
+    robot_type: Literal["tfrobot", "openclaw"] = Field(
+        default="tfrobot",
+        description="机器人类型，必须与 access_url 路径一致",
+    )
+    manager_api_base_url: str = Field(description="TFRSManager 机器 API origin（POST /api/v1/oauth/token 的 host）")
     verify: bool = Field(default=True, description="HTTPS 证书校验")
     ca_bundle: Path | None = Field(default=None, description="自定义 CA bundle（自签 / 本地开发兜底）")
     timeout_s: float = Field(default=30.0, ge=1.0, description="HTTP 超时（秒）")
 
-    @field_validator("api_base_url", "manager_base_url")
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_legacy_keys(cls, data: object) -> object:
+        if isinstance(data, dict) and "access_url" not in data:
+            legacy = sorted(_LEGACY_ROBOT_KEYS & set(data))
+            if legacy:
+                raise ValueError(f"{_LEGACY_CONFIG_HINT}（收到旧字段：{', '.join(legacy)}）")
+        return data
+
+    @field_validator("access_url", "manager_api_base_url")
     @classmethod
     def _validate_url_scheme(cls, value: str) -> str:
         if not value.startswith(("http://", "https://")):
             raise ValueError(f"URL must start with http:// or https://; got {value!r}")
         return value
+
+    @field_validator("access_url")
+    @classmethod
+    def _validate_access_url(cls, value: str) -> str:
+        parsed = urlsplit(value)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            raise ValueError(f"access_url must be an absolute http(s) URL; got {value!r}")
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("access_url must not contain userinfo")
+        if parsed.query or parsed.fragment:
+            raise ValueError("access_url must not contain query or fragment")
+        if not _ROBOT_PATH_RE.fullmatch(parsed.path):
+            raise ValueError(
+                "access_url path must be /c/{robotType}/{robotId}/ "
+                f"(e.g. https://acme.test.turingfocus.cn/c/tfrobot/robot-1/); got {parsed.path!r}"
+            )
+        return value
+
+    @field_validator("manager_api_base_url")
+    @classmethod
+    def _validate_manager_origin(cls, value: str) -> str:
+        parsed = urlsplit(value)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            raise ValueError(f"manager_api_base_url must be an absolute http(s) origin; got {value!r}")
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("manager_api_base_url must not contain userinfo")
+        if parsed.path not in ("", "/") or parsed.query or parsed.fragment:
+            raise ValueError("manager_api_base_url must be an origin (no path/query/fragment)")
+        return value.rstrip("/")
 
     @field_validator("ca_bundle")
     @classmethod
@@ -54,6 +153,18 @@ class RobotTarget(BaseModel):
         if value is not None and not value.is_file():
             raise ValueError(f"ca_bundle file not found: {value}")
         return value
+
+    @model_validator(mode="after")
+    def _validate_target_consistency(self) -> RobotTarget:
+        match = _ROBOT_PATH_RE.fullmatch(urlsplit(self.access_url).path)
+        assert match is not None  # guaranteed by _validate_access_url
+        if match.group("robot_type") != self.robot_type:
+            raise ValueError(f"access_url robotType {match.group('robot_type')!r} != robot_type {self.robot_type!r}")
+        if match.group("robot_id") != self.robot_id:
+            raise ValueError(f"access_url robotId {match.group('robot_id')!r} != robot_id {self.robot_id!r}")
+        if not _ROBOT_ID_RE.fullmatch(self.robot_id):
+            raise ValueError(f"robot_id contains unsupported characters: {self.robot_id!r}")
+        return self
 
 
 class UserPatConfig(BaseModel):
@@ -68,7 +179,6 @@ class UserPatConfig(BaseModel):
     pat: SecretStr = Field(description="用户个人访问令牌（tfp_…）")
     robot_public_id: str = Field(
         description="目标机器人 public_id（{orgSlug}:{employeeNo}）→ audience robot:{public_id}",
-        pattern=r"^[a-z0-9-]+:[a-zA-Z0-9]+$",
     )
     scopes: str = Field(
         default="config:read config:write config:publish",
@@ -76,6 +186,11 @@ class UserPatConfig(BaseModel):
             "空格分隔的配置 scope；默认申请 theseus-kit 的完整配置能力，Manager 最终按 PAT 权限上限与 Robot 授权求交。"
         ),
     )
+
+    @field_validator("robot_public_id")
+    @classmethod
+    def _validate_public_id_field(cls, value: str) -> str:
+        return _validate_public_id_value(value)
 
     @field_validator("scopes")
     @classmethod
@@ -92,19 +207,27 @@ class UserPatConfig(BaseModel):
 class OAuthConfig(BaseModel):
     """OAuth 2.0 / 2.1 authorization (MCP-standard, no PAT).
 
-    When no explicit PAT is configured, theseus-kit
-    acts as an OAuth Protected Resource (RS): the MCP Client drives the
-    authorization-code + PKCE flow against the TFRSManager AS, and theseus-kit
-    validates the resulting Bearer token then forwards it directly to the target
-    TFRobotServer (no token exchange — TFRobotServer natively accepts OAuth AS
-    tokens per §10.1-new of the OAuth design).
+    When no explicit PAT is configured, theseus-kit acts as an OAuth Protected
+    Resource (RS): the MCP Client drives the authorization-code + PKCE flow
+    against the TFRSManager AS, and theseus-kit validates the resulting Bearer
+    token then forwards it directly to the target TFRobotServer (no token
+    exchange).
 
-    .. seealso:: :ref:`docs/auth-oauth-design.md` §4, §5.
+    Manager's Authorization Code resource/audience is
+    ``{issuer}/robots/{public_id}`` (TFRM-760); the expected audience is derived
+    from the discovered AS issuer and *robot_public_id*, not from
+    *resource_server_url*.  ``resource_server_url`` remains the MCP RS/PRM URL
+    (Topology A).  TFRobotServer natively accepts this ``typ=at+jwt`` profile.
+
+    .. seealso:: :ref:`docs/auth-oauth-design.md`.
     """
 
     kind: Literal["oauth"] = "oauth"
     authorization_server: str = Field(
-        description="TFRSManager OAuth AS base URL（用于 PRM 发现 + Bearer 校验的 JWKS 获取）",
+        description="TFRSManager OAuth AS issuer/base URL（PRM 发现 + JWKS 获取）",
+    )
+    robot_public_id: str = Field(
+        description="目标机器人 public_id（{orgSlug}:{employeeNo}）→ OAuth resource/audience",
     )
     scopes: str = Field(
         default="config:read",
@@ -121,11 +244,15 @@ class OAuthConfig(BaseModel):
     resource_server_url: str | None = Field(
         default=None,
         description=(
-            "theseus-kit PRM resource URL（Topology A HTTP 入口），"
-            "用作 token audience 校验 + AuthSettings.resource_server_url；"
-            "None 跳过 audience 校验（宽松模式，仅开发/调试）"
+            "theseus-kit 的 MCP RS/PRM URL（Topology A）；"
+            "不是 token audience（OAuth audience 是 {issuer}/robots/{public_id}）"
         ),
     )
+
+    @field_validator("robot_public_id")
+    @classmethod
+    def _validate_public_id_field(cls, value: str) -> str:
+        return _validate_public_id_value(value)
 
     @field_validator("authorization_server")
     @classmethod
@@ -157,12 +284,13 @@ class TheseusSettings(BaseSettings):
 
     Env nesting uses ``__``. Examples::
 
+        THESEUS_ROBOT__ACCESS_URL=https://acme.test.turingfocus.cn/c/tfrobot/robot-1/
         THESEUS_ROBOT__ROBOT_ID=robot-1
-        THESEUS_ROBOT__NAMESPACE=default
-        THESEUS_ROBOT__API_BASE_URL=https://api.example.com
+        THESEUS_ROBOT__ROBOT_TYPE=tfrobot
+        THESEUS_ROBOT__MANAGER_API_BASE_URL=https://rest.test.turingfocus.cn
         THESEUS_CREDENTIAL__KIND=user_pat
         THESEUS_CREDENTIAL__PAT=tfp_xxx
-        THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID=myorg:12345
+        THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID=myorg:EMP010-R
     """
 
     model_config = SettingsConfigDict(
@@ -176,6 +304,19 @@ class TheseusSettings(BaseSettings):
 
     robot: RobotTarget
     credential: CredentialConfig
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_legacy_env(cls, data: object) -> object:
+        # pydantic-settings drops unknown env keys (extra=ignore), so detect the
+        # retired names explicitly and fail with an actionable migration hint.
+        robot_data = data.get("robot") if isinstance(data, dict) else None
+        if os.environ.get("THESEUS_ROBOT__ACCESS_URL") or (isinstance(robot_data, dict) and "access_url" in robot_data):
+            return data
+        legacy = [name for name in _LEGACY_ROBOT_ENV if os.environ.get(name)]
+        if legacy:
+            raise ValueError(f"{_LEGACY_CONFIG_HINT}（收到旧环境变量：{', '.join(legacy)}）")
+        return data
 
 
 def format_settings_errors(exc: ValidationError) -> str:

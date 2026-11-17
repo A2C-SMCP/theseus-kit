@@ -18,7 +18,10 @@ from theseus_kit.errors import (
     LlmsDocError,
     PublishNotConfirmedError,
     PublishPreCheckError,
+    RobotAddressChangedError,
     RobotApiError,
+    RobotPathRejectedError,
+    RobotRouteNotFoundError,
     RobotValidationError,
     RoutingConfigError,
     ScopeOrAudienceError,
@@ -51,7 +54,7 @@ from theseus_kit.models import (
 )
 from theseus_kit.oauth import TheseusTokenVerifier, build_token_verifier
 from theseus_kit.resources import set_last_locator
-from theseus_kit.routing import RequestContext
+from theseus_kit.routing import RobotAddress
 from theseus_kit.server import create_mcp_server
 from theseus_kit.services import (
     ConfigPublisher,
@@ -65,7 +68,7 @@ from theseus_kit.services import (
 )
 from theseus_kit.transport import RobotClient, StaticTokenSource
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 __all__ = [
     "__version__",
@@ -74,7 +77,7 @@ __all__ = [
     "CredentialConfig",
     "OAuthConfig",
     "UserPatConfig",
-    "RequestContext",
+    "RobotAddress",
     "RobotClient",
     "StaticTokenSource",
     "TheseusError",
@@ -90,6 +93,9 @@ __all__ = [
     "ExchangeUnavailableError",
     "AuthRejectedError",
     "RobotApiError",
+    "RobotAddressChangedError",
+    "RobotRouteNotFoundError",
+    "RobotPathRejectedError",
     "RobotValidationError",
     "TheseusTokenVerifier",
     "build_token_verifier",

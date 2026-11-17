@@ -19,7 +19,7 @@ Covers, through the official SDK:
    (``${TFROBOT_SKILL_DIR}`` renders to this path, skill.md §9.3/§9.4),
 4. tool inventory via ``client:get_tools``,
 5. the tool-call chain (``client:tool_call`` → real tool → real robot HTTP)
-   including the X-TF-* routing contract observed on the fake robot,
+   including the canonical /c/{type}/{rid} path observed on the fake robot,
 6. ``client:get_resources`` passthrough with cursor pagination.
 
 Gated behind ``THESEUS_E2E=1`` like the robot e2e suite; run with::
@@ -169,13 +169,13 @@ async def test_kit_full_chain(signaling_endpoint: str, fake_robot: FakeRobotServ
         text = "\n".join(c.text for c in result.content if hasattr(c, "text"))
         assert "# robot llms.txt" in text, f"unexpected llms.txt body: {text!r}"
 
-        # The X-TF-* routing contract was enforced on the wire by the fake robot.
+        # The canonical /c/tfrobot/{rid} path is enforced by the fake gateway.
         llms_requests = fake_robot.robot_gets_for("/llms.txt")
         assert llms_requests, "no /llms.txt request reached the fake robot"
-        headers = llms_requests[-1].headers
-        assert headers["x-tf-robotid"] == "e2e-robot"
-        assert headers["x-tf-namespace"] == "e2e-ns"
-        assert headers["x-tf-robottype"] == "tfrobot"
+        request = llms_requests[-1]
+        assert request.path == "/c/tfrobot/e2e-robot/llms.txt"
+        assert request.headers["authorization"].startswith("Bearer ")
+        assert "x-tf-namespace" not in request.headers
         # Credential exchange happened against the Manager endpoint first.
         assert fake_robot.token_posts(), "token exchange must precede robot reads"
 

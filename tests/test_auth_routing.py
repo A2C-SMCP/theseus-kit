@@ -21,9 +21,10 @@ from theseus_kit import (
     CredentialError,
     ExchangeUnavailableError,
     OAuthConfig,
-    RequestContext,
+    RobotAddressChangedError,
     RobotApiError,
     RobotClient,
+    RobotRouteNotFoundError,
     RoutingConfigError,
     TheseusError,
     TheseusSettings,
@@ -31,11 +32,10 @@ from theseus_kit import (
 )
 from theseus_kit.credentials import build_credential
 from theseus_kit.redaction import REDACTED, redact_secrets
+from theseus_kit.routing import RobotAddress
 from theseus_kit.tokens import build_token_source
 
-from ._fakeserver import FakeRobotServer, parse_form
-
-_CTX = dict(robot_id="robot-1", namespace="default", robot_type="tfrobot")
+from ._fakeserver import FakeRobotServer, RobotResponse, parse_form
 
 
 class FakeClock:
@@ -64,30 +64,37 @@ def _client(
     credential = cred or UserPatConfig(pat=SecretStr("tfp_test_pat"), robot_public_id="turingfocus:000042")
     token_source = build_token_source(
         credential,
-        manager_base_url=fake.manager_base_url,
+        manager_base_url=fake.manager_api_base_url,
         clock=clock,  # type: ignore[arg-type]
         sleep=sleep,  # type: ignore[arg-type]
     )
-    context = RequestContext(**_CTX)
-    return RobotClient(token_source, context, api_base_url=api_base_url or fake.api_base_url)
+    return RobotClient(token_source, base_url=api_base_url or fake.access_url)
 
 
-# --- routing context ---------------------------------------------------------
+# --- canonical access address ------------------------------------------------
 
 
-def test_routing_headers_carry_all_three_fields() -> None:
-    headers = RequestContext(**_CTX).routing_headers()
-    assert headers == {
-        "X-TF-Namespace": "default",
-        "X-TF-RobotId": "robot-1",
-        "X-TF-RobotType": "tfrobot",
-    }
+def test_robot_address_accepts_canonical_url() -> None:
+    addr = RobotAddress(
+        access_url="https://acme.test.turingfocus.cn/c/tfrobot/robot-1/",
+        robot_id="robot-1",
+        robot_type="tfrobot",
+    )
+    assert addr.base_url == "https://acme.test.turingfocus.cn/c/tfrobot/robot-1/"
 
 
-@pytest.mark.parametrize("bad", ["UPPER", "has space", "under_score", "dot.dot", ""])
-def test_routing_rejects_bad_charset(bad: str) -> None:
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://acme.test.turingfocus.cn/v1/factory",
+        "https://acme.test.turingfocus.cn/c/tfrobot/UPPER/",
+        "https://acme.test.turingfocus.cn/c/tfrobot/robot-1/?x=1",
+        "https://user:pass@acme.test.turingfocus.cn/c/tfrobot/robot-1/",
+    ],
+)
+def test_robot_address_rejects_non_canonical_url(url: str) -> None:
     with pytest.raises(RoutingConfigError):
-        RequestContext(robot_id=bad, namespace="default", robot_type="tfrobot")
+        RobotAddress(access_url=url, robot_id="robot-1", robot_type="tfrobot")
 
 
 # --- exchange wire + header injection (user_pat / token-exchange) -------------
@@ -120,17 +127,18 @@ async def test_exchange_wire_user_pat_uses_configured_scopes(fake_server: FakeRo
     assert form["scope"] == "config:read config:write"
 
 
-async def test_robot_requests_carry_routing_headers(fake_server: FakeRobotServer) -> None:
+async def test_robot_requests_use_canonical_path_and_bearer_only(fake_server: FakeRobotServer) -> None:
     async with _client(fake_server) as client:
         text = await client.get_llms_txt()
     assert text == "# robot llms.txt\n"
-    # The fake 400s on any missing X-TF-* header, so a 200 proves all three were
-    # sent; assert the values explicitly as well (names lowercased on the wire).
-    headers = fake_server.robot_gets_for("/llms.txt")[0].headers
-    assert headers["x-tf-namespace"] == "default"
-    assert headers["x-tf-robotid"] == "robot-1"
-    assert headers["x-tf-robottype"] == "tfrobot"
-    assert headers["authorization"].startswith("Bearer ")
+    recorded = fake_server.robot_gets_for("/llms.txt")[0]
+    # The full wire path is Host + /c/tfrobot/{rid} + upstream path.
+    assert recorded.path == "/c/tfrobot/robot-1/llms.txt"
+    assert recorded.headers["authorization"].startswith("Bearer ")
+    # X-TF-* is retired; it must not be sent at all.
+    assert "x-tf-namespace" not in recorded.headers
+    assert "x-tf-robotid" not in recorded.headers
+    assert "x-tf-robottype" not in recorded.headers
 
 
 async def test_read_paths_succeed(fake_server: FakeRobotServer) -> None:
@@ -214,13 +222,32 @@ async def test_robot_401_maps_to_auth_rejected(fake_server: FakeRobotServer) -> 
 
 
 async def test_robot_500_maps_to_robot_api_error(fake_server: FakeRobotServer) -> None:
-    from ._fakeserver import RobotResponse
-
     fake_server.robot_responses["/llms.txt"] = RobotResponse(500, b'{"error":"boom"}')
     async with _client(fake_server) as client:
         with pytest.raises(RobotApiError) as exc_info:
             await client.get_llms_txt()
     assert exc_info.value.status_code == 500
+
+
+async def test_robot_409_address_changed_maps_to_typed_error(fake_server: FakeRobotServer) -> None:
+    fake_server.robot_responses["/llms.txt"] = RobotResponse(
+        409,
+        b'{"errorCode":"ROBOT_ADDRESS_CHANGED","message":"rediscover"}',
+    )
+    async with _client(fake_server) as client:
+        with pytest.raises(RobotAddressChangedError) as exc_info:
+            await client.get_llms_txt()
+    assert exc_info.value.status_code == 409
+    assert "ACCESS_URL" in str(exc_info.value)
+
+
+async def test_robot_404_unknown_host_maps_to_route_error(fake_server: FakeRobotServer) -> None:
+    fake_server.robot_responses["/llms.txt"] = RobotResponse(404, b"unknown ingress host")
+    async with _client(fake_server) as client:
+        with pytest.raises(RobotRouteNotFoundError) as exc_info:
+            await client.get_llms_txt()
+    assert exc_info.value.status_code == 404
+    assert "Host" in str(exc_info.value)
 
 
 async def test_network_failure_maps_to_robot_api_error(fake_server: FakeRobotServer) -> None:
@@ -370,6 +397,14 @@ def test_user_pat_builds_credential_with_correct_audience() -> None:
     assert cred.scope == "config:read config:write config:publish"
 
 
+@pytest.mark.parametrize("public_id", ["turingfocus:EMP010-R", "my-org:emp:001"])
+def test_public_id_accepts_manager_valid_shapes(public_id: str) -> None:
+    cfg = UserPatConfig(pat=SecretStr("tfp_pat"), robot_public_id=public_id)
+    assert cfg.robot_public_id == public_id
+    cred = build_credential(cfg)
+    assert cred.audience == f"robot:{public_id}"
+
+
 def test_user_pat_builds_credential_with_configured_scopes() -> None:
     cred = build_credential(
         UserPatConfig(
@@ -393,14 +428,13 @@ def test_user_pat_rejects_empty_or_non_config_scopes(scopes: str) -> None:
 
 def test_settings_load_user_pat_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     env = {
+        "THESEUS_ROBOT__ACCESS_URL": "https://acme.test.turingfocus.cn/c/tfrobot/robot-1/",
         "THESEUS_ROBOT__ROBOT_ID": "robot-1",
-        "THESEUS_ROBOT__NAMESPACE": "default",
         "THESEUS_ROBOT__ROBOT_TYPE": "tfrobot",
-        "THESEUS_ROBOT__API_BASE_URL": "https://api.example.com",
-        "THESEUS_ROBOT__MANAGER_BASE_URL": "https://mgr.example.com",
+        "THESEUS_ROBOT__MANAGER_API_BASE_URL": "https://rest.test.turingfocus.cn",
         "THESEUS_CREDENTIAL__KIND": "user_pat",
         "THESEUS_CREDENTIAL__PAT": "tfp_test_pat",
-        "THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID": "turingfocus:000042",
+        "THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID": "turingfocus:EMP010-R",
         "THESEUS_CREDENTIAL__SCOPES": "config:read config:write",
     }
     for key in env:
@@ -410,7 +444,8 @@ def test_settings_load_user_pat_from_env(monkeypatch: pytest.MonkeyPatch) -> Non
     settings = TheseusSettings()
     assert settings.credential.kind == "user_pat"
     assert settings.credential.scopes == "config:read config:write"
-    assert settings.robot.api_base_url == "https://api.example.com"
+    assert settings.robot.access_url == "https://acme.test.turingfocus.cn/c/tfrobot/robot-1/"
+    assert settings.robot.manager_api_base_url == "https://rest.test.turingfocus.cn"
 
 
 def test_config_rejects_bad_url_scheme() -> None:
@@ -418,11 +453,25 @@ def test_config_rejects_bad_url_scheme() -> None:
 
     with pytest.raises(ValidationError):
         RobotTarget(
+            access_url="acme.test.turingfocus.cn/c/tfrobot/robot-1/",  # missing http(s)://
             robot_id="robot-1",
-            namespace="default",
             robot_type="tfrobot",
-            api_base_url="api.example.com",  # missing http(s)://
-            manager_base_url="https://mgr.example.com",
+            manager_api_base_url="https://rest.test.turingfocus.cn",
+        )
+
+
+def test_config_rejects_legacy_router_fields() -> None:
+    from theseus_kit import RobotTarget
+
+    with pytest.raises(ValidationError, match="旧路由字段已退役"):
+        RobotTarget.model_validate(
+            {
+                "robot_id": "robot-1",
+                "namespace": "default",
+                "robot_type": "tfrobot",
+                "api_base_url": "https://api.example.com",
+                "manager_base_url": "https://mgr.example.com",
+            }
         )
 
 
@@ -433,11 +482,10 @@ def test_config_rejects_missing_ca_bundle() -> None:
 
     with pytest.raises(ValidationError):
         RobotTarget(
+            access_url="https://acme.test.turingfocus.cn/c/tfrobot/robot-1/",
             robot_id="robot-1",
-            namespace="default",
             robot_type="tfrobot",
-            api_base_url="https://api.example.com",
-            manager_base_url="https://mgr.example.com",
+            manager_api_base_url="https://rest.test.turingfocus.cn",
             ca_bundle=Path("/does/not/exist"),
         )
 
@@ -447,46 +495,53 @@ def test_config_rejects_missing_ca_bundle() -> None:
 
 class TestOAuthConfigDefaults:
     def test_default_scope_is_config_read(self) -> None:
-        cfg = OAuthConfig(authorization_server="https://auth.example.com")
+        cfg = OAuthConfig(authorization_server="https://auth.example.com", robot_public_id="turingfocus:EMP010-R")
         assert cfg.scopes == "config:read"
 
     def test_client_id_defaults_to_none(self) -> None:
-        cfg = OAuthConfig(authorization_server="https://auth.example.com")
+        cfg = OAuthConfig(authorization_server="https://auth.example.com", robot_public_id="turingfocus:EMP010-R")
         assert cfg.client_id is None
 
     def test_redirect_uri_defaults_to_none(self) -> None:
-        cfg = OAuthConfig(authorization_server="https://auth.example.com")
+        cfg = OAuthConfig(authorization_server="https://auth.example.com", robot_public_id="turingfocus:EMP010-R")
         assert cfg.redirect_uri is None
 
     def test_kind_is_oauth(self) -> None:
-        cfg = OAuthConfig(authorization_server="https://auth.example.com")
+        cfg = OAuthConfig(authorization_server="https://auth.example.com", robot_public_id="turingfocus:EMP010-R")
         assert cfg.kind == "oauth"
 
 
 class TestOAuthConfigValidation:
     def test_rejects_bare_hostname(self) -> None:
         with pytest.raises(ValidationError, match="must start with http:// or https://"):
-            OAuthConfig(authorization_server="auth.example.com")
+            OAuthConfig(authorization_server="auth.example.com", robot_public_id="turingfocus:EMP010-R")
 
     def test_accepts_https_url(self) -> None:
-        cfg = OAuthConfig(authorization_server="https://auth.example.com")
+        cfg = OAuthConfig(authorization_server="https://auth.example.com", robot_public_id="turingfocus:EMP010-R")
         assert cfg.authorization_server == "https://auth.example.com"
 
     def test_accepts_http_url(self) -> None:
-        cfg = OAuthConfig(authorization_server="http://localhost:8080")
+        cfg = OAuthConfig(authorization_server="http://localhost:8080", robot_public_id="turingfocus:EMP010-R")
         assert cfg.authorization_server == "http://localhost:8080"
 
     def test_rejects_bad_redirect_uri(self) -> None:
         with pytest.raises(ValidationError, match="redirect_uri must start with http:// or https://"):
-            OAuthConfig(authorization_server="https://auth.example.com", redirect_uri="oob")
+            OAuthConfig(
+                authorization_server="https://auth.example.com",
+                robot_public_id="turingfocus:EMP010-R",
+                redirect_uri="oob",
+            )
 
     def test_allows_null_redirect_uri(self) -> None:
-        cfg = OAuthConfig(authorization_server="https://auth.example.com", redirect_uri=None)
+        cfg = OAuthConfig(
+            authorization_server="https://auth.example.com", robot_public_id="turingfocus:EMP010-R", redirect_uri=None
+        )
         assert cfg.redirect_uri is None
 
     def test_all_optional_fields_explicit(self) -> None:
         cfg = OAuthConfig(
             authorization_server="https://auth.example.com",
+            robot_public_id="turingfocus:EMP010-R",
             scopes="config:read config:write",
             client_id="pre-registered-client-123",
             redirect_uri="http://127.0.0.1:12345/callback",
@@ -499,37 +554,37 @@ class TestOAuthConfigValidation:
 class TestOAuthConfigEnvLoading:
     def test_oauth_kind_loads_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         env = {
+            "THESEUS_ROBOT__ACCESS_URL": "https://acme.test.turingfocus.cn/c/tfrobot/robot-1/",
             "THESEUS_ROBOT__ROBOT_ID": "robot-1",
-            "THESEUS_ROBOT__NAMESPACE": "default",
             "THESEUS_ROBOT__ROBOT_TYPE": "tfrobot",
-            "THESEUS_ROBOT__API_BASE_URL": "https://api.example.com",
-            "THESEUS_ROBOT__MANAGER_BASE_URL": "https://mgr.example.com",
+            "THESEUS_ROBOT__MANAGER_API_BASE_URL": "https://rest.test.turingfocus.cn",
             "THESEUS_CREDENTIAL__KIND": "oauth",
             "THESEUS_CREDENTIAL__AUTHORIZATION_SERVER": "https://auth.example.com",
+            "THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID": "turingfocus:EMP010-R",
         }
         for key in env:
             monkeypatch.setenv(key, env[key])
         # Also clear any PAT env that might linger.
         for stale in [
             "THESEUS_CREDENTIAL__PAT",
-            "THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID",
         ]:
             monkeypatch.delenv(stale, raising=False)
         settings = TheseusSettings()
         assert isinstance(settings.credential, OAuthConfig)
         assert settings.credential.kind == "oauth"
         assert settings.credential.authorization_server == "https://auth.example.com"
+        assert settings.credential.robot_public_id == "turingfocus:EMP010-R"
         assert settings.credential.scopes == "config:read"  # default
 
     def test_oauth_kind_with_optional_fields_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         env = {
+            "THESEUS_ROBOT__ACCESS_URL": "https://acme.test.turingfocus.cn/c/tfrobot/robot-1/",
             "THESEUS_ROBOT__ROBOT_ID": "robot-1",
-            "THESEUS_ROBOT__NAMESPACE": "default",
             "THESEUS_ROBOT__ROBOT_TYPE": "tfrobot",
-            "THESEUS_ROBOT__API_BASE_URL": "https://api.example.com",
-            "THESEUS_ROBOT__MANAGER_BASE_URL": "https://mgr.example.com",
+            "THESEUS_ROBOT__MANAGER_API_BASE_URL": "https://rest.test.turingfocus.cn",
             "THESEUS_CREDENTIAL__KIND": "oauth",
             "THESEUS_CREDENTIAL__AUTHORIZATION_SERVER": "https://auth.example.com",
+            "THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID": "turingfocus:EMP010-R",
             "THESEUS_CREDENTIAL__SCOPES": "config:read config:write",
             "THESEUS_CREDENTIAL__CLIENT_ID": "pre-registered-client",
             "THESEUS_CREDENTIAL__REDIRECT_URI": "http://127.0.0.1:12345/callback",
@@ -551,15 +606,15 @@ class TestOAuthConfigDiscrimination:
         """The discriminated union routes kind=oauth to OAuthConfig."""
         settings = TheseusSettings(
             robot=dict(
+                access_url="https://acme.test.turingfocus.cn/c/tfrobot/robot-1/",
                 robot_id="robot-1",
-                namespace="default",
                 robot_type="tfrobot",
-                api_base_url="https://api.example.com",
-                manager_base_url="https://mgr.example.com",
+                manager_api_base_url="https://rest.test.turingfocus.cn",
             ),
             credential=dict(
                 kind="oauth",
                 authorization_server="https://auth.example.com",
+                robot_public_id="turingfocus:EMP010-R",
             ),
         )
         assert isinstance(settings.credential, OAuthConfig)
@@ -569,11 +624,10 @@ class TestOAuthConfigDiscrimination:
         """The user_pat credential path loads correctly."""
         settings = TheseusSettings(
             robot=dict(
+                access_url="https://acme.test.turingfocus.cn/c/tfrobot/robot-1/",
                 robot_id="robot-1",
-                namespace="default",
                 robot_type="tfrobot",
-                api_base_url="https://api.example.com",
-                manager_base_url="https://mgr.example.com",
+                manager_api_base_url="https://rest.test.turingfocus.cn",
             ),
             credential=dict(
                 kind="user_pat",
@@ -594,7 +648,7 @@ class TestBuildCredentialRejectsOAuth:
         """OAuth tokens don't go through the exchange pipeline."""
         from theseus_kit.credentials import build_credential
 
-        cfg = OAuthConfig(authorization_server="https://auth.example.com")
+        cfg = OAuthConfig(authorization_server="https://auth.example.com", robot_public_id="turingfocus:EMP010-R")
         with pytest.raises(ConfigError, match="OAuth credentials bypass the token exchange pipeline"):
             build_credential(cfg)
 
@@ -638,11 +692,10 @@ async def test_from_settings_builds_working_client(fake_server: FakeRobotServer)
 
     settings = TheseusSettings(
         robot=RobotTarget(
+            access_url=fake_server.access_url,
             robot_id="robot-1",
-            namespace="default",
             robot_type="tfrobot",
-            api_base_url=fake_server.api_base_url,
-            manager_base_url=fake_server.manager_base_url,
+            manager_api_base_url=fake_server.manager_api_base_url,
         ),
         credential=UserPatConfig(pat=SecretStr("tfp_test_pat"), robot_public_id="turingfocus:000042"),
     )

@@ -42,10 +42,9 @@ async def main() -> None:
         fail("Step 1", f"Cannot load settings: {exc}")
 
     print(f"  robot_id:      {settings.robot.robot_id}")
-    print(f"  namespace:     {settings.robot.namespace}")
     print(f"  robot_type:    {settings.robot.robot_type}")
-    print(f"  api_base_url:  {settings.robot.api_base_url}")
-    print(f"  manager_url:   {settings.robot.manager_base_url}")
+    print(f"  access_url:    {settings.robot.access_url}")
+    print(f"  manager_url:   {settings.robot.manager_api_base_url}")
     print(f"  verify:        {settings.robot.verify}")
     print(f"  credential:    kind={settings.credential.kind}")
     ok()
@@ -60,10 +59,10 @@ async def main() -> None:
     try:
         cred = build_credential(settings.credential)
         print(f"  credential type: {type(cred).__name__}")
-        # PatCredential uses pat + robot_public_id; no client_id.
-        public_id = getattr(cred, "robot_public_id", None)
-        if public_id is not None:
-            print(f"  robot_public_id: {public_id}")
+        # PatCredential exposes the target audience (robot:{public_id}).
+        audience = getattr(cred, "audience", None)
+        if audience is not None:
+            print(f"  audience: {audience}")
     except Exception as exc:
         fail("Step 2", f"Cannot build credential: {exc}")
 
@@ -75,13 +74,13 @@ async def main() -> None:
 
     from theseus_kit.tokens import TOKEN_PATH
 
-    token_url = settings.robot.manager_base_url.rstrip("/") + TOKEN_PATH
+    token_url = settings.robot.manager_api_base_url.rstrip("/") + TOKEN_PATH
     print(f"  endpoint: {token_url}")
 
     try:
         token_source = build_token_source(
             settings.credential,
-            manager_base_url=settings.robot.manager_base_url,
+            manager_base_url=settings.robot.manager_api_base_url,
         )
         token = await token_source.token()
     except Exception as exc:
@@ -96,18 +95,9 @@ async def main() -> None:
 
     # ---- Step 4: Call robot /llms.txt -------------------------------------
 
-    banner("Step 4: Call robot /llms.txt with Bearer + X-TF-*")
+    banner("Step 4: Call robot /llms.txt with Bearer + canonical path")
 
-    from theseus_kit.routing import RequestContext
-
-    context = RequestContext(
-        robot_id=settings.robot.robot_id,
-        namespace=settings.robot.namespace,
-        robot_type=settings.robot.robot_type,
-    )
-
-    for name, value in context.routing_headers().items():
-        print(f"  {name}: {value}")
+    print(f"  access_url: {settings.robot.access_url}")
 
     from theseus_kit.transport import RobotClient
 

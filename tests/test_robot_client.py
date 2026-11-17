@@ -22,13 +22,9 @@ from theseus_kit import (
     RobotValidationError,
     UserPatConfig,
 )
-from theseus_kit.routing import RequestContext
 from theseus_kit.tokens import build_token_source
 
 from ._fakeserver import FakeRobotServer, RobotResponse
-
-_CTX = dict(robot_id="robot-1", namespace="default", robot_type="tfrobot")
-
 
 # ── Test DTOs ─────────────────────────────────────────────────────────────────
 
@@ -52,12 +48,10 @@ def _client(fake: FakeRobotServer, *, api_base_url: str | None = None, **kw: obj
         pat=SecretStr("tfp_test_pat"),
         robot_public_id="turingfocus:000042",
     )
-    token_source = build_token_source(cred, manager_base_url=fake.manager_base_url)
-    context = RequestContext(**_CTX)
+    token_source = build_token_source(cred, manager_base_url=fake.manager_api_base_url)
     return RobotClient(
         token_source,
-        context,
-        api_base_url=api_base_url if api_base_url is not None else fake.api_base_url,
+        base_url=api_base_url if api_base_url is not None else fake.access_url,
         **kw,  # type: ignore[arg-type]
     )
 
@@ -84,15 +78,16 @@ async def test_get_model_code_not_200_raises(fake_server: FakeRobotServer) -> No
     assert exc_info.value.status_code == 500
 
 
-async def test_get_model_injects_bearer_and_routing_headers(fake_server: FakeRobotServer) -> None:
+async def test_get_model_injects_bearer_only(fake_server: FakeRobotServer) -> None:
     fake_server.robot_responses["/test"] = RobotResponse(
         200, b'{"code":200,"message":"ok","data":{"id":2,"name":"with-headers"}}'
     )
     async with _client(fake_server) as client:
         await client.get_model("/test", _Item)
-    headers = fake_server.robot_gets_for("/test")[0].headers
-    assert headers["x-tf-namespace"] == "default"
-    assert headers["authorization"].startswith("Bearer ")
+    recorded = fake_server.robot_gets_for("/test")[0]
+    assert recorded.path == "/c/tfrobot/robot-1/test"
+    assert recorded.headers["authorization"].startswith("Bearer ")
+    assert "x-tf-namespace" not in recorded.headers
 
 
 # ── get_paginated ─────────────────────────────────────────────────────────────
@@ -127,7 +122,7 @@ async def test_get_paginated_sends_page_params(fake_server: FakeRobotServer) -> 
     )
     async with _client(fake_server) as client:
         await client.get_paginated("/paginated", _Item, page=3, page_size=50)
-    gets = [r for r in fake_server.robot_gets() if r.path.startswith("/paginated?")]
+    gets = [r for r in fake_server.robot_gets() if fake_server.path_key(r.path) == "/paginated" and "page=3" in r.path]
     assert len(gets) == 1
     assert "page=3" in gets[0].path
     assert "pageSize=50" in gets[0].path
@@ -154,18 +149,18 @@ async def test_post_sends_json_body(fake_server: FakeRobotServer) -> None:
     async with _client(fake_server) as client:
         resp = await client.post("/create", json=payload)
     assert resp.status_code == 200
-    post_reqs = [r for r in fake_server.requests if r.method == "POST" and r.path == "/create"]
+    post_reqs = [r for r in fake_server.requests if r.method == "POST" and fake_server.path_key(r.path) == "/create"]
     assert len(post_reqs) == 1
     assert json.loads(post_reqs[0].body) == payload
 
 
-async def test_post_injects_routing_headers(fake_server: FakeRobotServer) -> None:
+async def test_post_injects_bearer_only(fake_server: FakeRobotServer) -> None:
     fake_server.robot_responses[("POST", "/create")] = RobotResponse(200, b'{"code":200,"message":"ok","data":{}}')
     async with _client(fake_server) as client:
         await client.post("/create", json={})
-    post_reqs = [r for r in fake_server.requests if r.method == "POST" and r.path == "/create"]
+    post_reqs = [r for r in fake_server.requests if r.method == "POST" and fake_server.path_key(r.path) == "/create"]
     headers = post_reqs[0].headers
-    assert headers["x-tf-namespace"] == "default"
+    assert "x-tf-namespace" not in headers
     assert headers["authorization"].startswith("Bearer ")
 
 
@@ -270,7 +265,9 @@ async def test_post_no_retry_single_attempt(fake_server: FakeRobotServer) -> Non
         with pytest.raises(RobotApiError) as exc_info:
             await client.post("/no-retry-post", json={"x": 1})
     assert exc_info.value.status_code == 503
-    post_reqs = [r for r in fake_server.requests if r.method == "POST" and r.path == "/no-retry-post"]
+    post_reqs = [
+        r for r in fake_server.requests if r.method == "POST" and fake_server.path_key(r.path) == "/no-retry-post"
+    ]
     assert len(post_reqs) == 1
 
 

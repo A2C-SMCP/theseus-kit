@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `theseus-kit` 是一个 MCP 服务器，用于安全地检查、编辑、模板化和发布 TFRobot 配置。它通过标准 MCP 协议运行，同时暴露可选的 A2C-SMCP 兼容的 `window://` 和 `skill://` 资源。
 
-当前状态：0.1.1，已实现 11 个 MCP 工具、3 个配置窗口和 12 类技能。默认 stdio 入口使用用户 PAT；无 PAT 的 stdio OAuth 外部回调登录尚未实现。
+当前状态：0.2.0，已实现 11 个 MCP 工具、3 个配置窗口和 12 类技能。默认 stdio 入口使用用户 PAT；无 PAT 的 stdio OAuth 外部回调登录尚未实现。
 
 ## 开发命令
 
@@ -44,11 +44,10 @@ uv run pytest tests/test_auth_routing.py::test_exchange_wire_user_pat -v
 
 ```bash
 THESEUS_E2E=1 \
+THESEUS_ROBOT__ACCESS_URL=https://<alias>/c/tfrobot/<rid>/ \
 THESEUS_ROBOT__ROBOT_ID=<rid> \
-THESEUS_ROBOT__NAMESPACE=<ns> \
 THESEUS_ROBOT__ROBOT_TYPE=tfrobot \
-THESEUS_ROBOT__API_BASE_URL=https://api.<clusterDomain> \
-THESEUS_ROBOT__MANAGER_BASE_URL=https://<manager-host> \
+THESEUS_ROBOT__MANAGER_API_BASE_URL=https://<manager-machine-api-origin> \
 THESEUS_CREDENTIAL__KIND=user_pat \
 THESEUS_CREDENTIAL__PAT=<tfp_...> \
 THESEUS_CREDENTIAL__ROBOT_PUBLIC_ID=<orgSlug>:<employeeNo> \
@@ -72,13 +71,15 @@ uv run poe ci && uv run poe build && uv run poe package-check
 3. **TFRobot 客户端**（`transport.py`、`routing.py`、`tokens.py`、`credentials.py`）— 认证 HTTP 适配器，对接 `/v1/factory/**` 和 `/llms.txt`
 4. **资源投影层** — `window://` 实时快照（`resources.py`，三个窗口 summary/recent/topology + 订阅能力 `subscriptions.py`）与 `skill://` 技能指南（`skills/`，12 个类别，三层结构）：`theseus` 总纲调度 → 阶段技能 `persona-interview` / `persona-optimize` / `plan-config` / `apply-config-plan` → 原子技能 `analyze-config` / `manage-topology` / `tune-config` / `save-template` / `publish-config` / `write-tfonto`，外加反馈闭环技能 `enhance`。阶段交接物在机器人工作区 `~/.theseus/workspaces/<slug>/`（画像 `<slug>.md` + `configs/` + `plans/`）
 
-### 认证与路由（第 3 层，#17 已交付）
+### 认证与路由（第 3 层）
 
-路由契约由 tfrs-operator 确认：
+路由契约由 TFRM / TFRO / TFRS develop 确认（2026-11；详见 `docs/upgrade-plan-robot-address-v2.md`）：
 
-- **入口**：`https://api.<clusterDomain>`（Istio 网关），不从集群外访问集群内服务
-- **X-TF-* 头部**（强制三项）：`X-TF-Namespace`、`X-TF-RobotId`、`X-TF-RobotType`，缺任何一项返回 400。值必须匹配 `^[a-z0-9-]+$`
-- **身份标识分离**：令牌 `audience` 是 `robot:<Account.ID>`（数字），与 `X-TF-RobotId`（rid）是**不同标识符**，不可混用
+- **入口**：Manager 权威 `accessURL`：`https://{alias}/c/tfrobot/{rid}/`。Host 决定 namespace，路径决定 robot；网关剥掉 `/c/{type}/{id}` 后转发 `/v1/factory/**`、`/llms.txt` 等
+- **不再发送 X-TF-***：`X-TF-Namespace` / `X-TF-RobotId` / `X-TF-RobotType` 已退役，外部头/Cookie/query 都不参与寻址；`RobotAuth` 只注入 `Authorization: Bearer`
+- **Manager 机器 API 分离**：`manager_api_base_url` 是换票/发现入口（test `rest.test.turingfocus.cn`；staging `api-staging…`；prod `api…`），不是 JWT issuer，也不是机器人入口
+- **身份标识分离**：PAT token-exchange 的 `audience` 是 `robot:{orgSlug}:{employeeNo}`（public_id），与 URL 路径中的 rid 是**不同标识符**；OAuth Authorization Code 为 `{issuer}/robots/{public_id}` + `typ=at+jwt`（TFRM-760）
+- **网关错误**：未知 Host / robot 不属于 Host → 404；旧 alias → 409 `ROBOT_ADDRESS_CHANGED`；路径非法 → 400。均不做静默重试
 - **凭证源**：`user_pat`（用户个人令牌）通过 `tfrs_auth.PatCredential` 抽象，使用 `AsyncCachingTokenSource`（缓存/单飞/近过期刷新/退避）进行 token-exchange 换发
 - **不做 401 自动刷新重试**：机器人返回 401/403 时抛出 `AuthRejectedError`，不静默重试
 
@@ -87,9 +88,9 @@ uv run poe ci && uv run poe build && uv run poe package-check
 | 模块 | 职责 |
 |------|------|
 | `server.py` | FastMCP 组合根，`main()` 启动 stdio 传输 |
-| `config.py` | `TheseusSettings`（pydantic-settings），从 `THESEUS_*` 环境变量或 `.env` 加载。包含 `RobotTarget`（路由目标）和 `CredentialConfig`（凭证，discriminated union） |
-| `routing.py` | `RequestContext` — frozen dataclass，构建时校验 X-TF-* 值，`routing_headers()` 生成三项头部 |
-| `transport.py` | `RobotAuth`（httpx.Auth 子类，注入 Bearer + X-TF-*）和 `RobotClient`（异步 HTTP 客户端，`from_settings()` 工厂方法，只读 helper：`get_llms_txt()`、`get_factory_doc()`） |
+| `config.py` | `TheseusSettings`（pydantic-settings），从 `THESEUS_*` 环境变量或 `.env` 加载。包含 `RobotTarget`（`access_url` / `robot_id` / `manager_api_base_url`）和 `CredentialConfig`（凭证，discriminated union） |
+| `routing.py` | `RobotAddress` — 校验 Manager 权威 `accessURL`（Host + `/c/{type}/{id}`） |
+| `transport.py` | `RobotAuth`（httpx.Auth 子类，仅注入 Bearer）和 `RobotClient`（异步 HTTP 客户端，`base_url=access_url`，`from_settings()` 工厂方法，只读 helper：`get_llms_txt()`、`get_factory_doc()`） |
 | `tokens.py` | `build_token_source()` — 组装 `AsyncCachingTokenSource`，Manager 换发端点固定 `/api/v1/oauth/token` |
 | `credentials.py` | `build_credential()` — 从 theseus-kit 配置构造 `tfrs_auth` 的 `PatCredential`，通过 token-exchange 换发 robot-scoped JWT |
 | `errors.py` | `TheseusError` 异常层级：`ConfigError` → `RoutingConfigError`、`CredentialError`、`ScopeOrAudienceError`、`ExchangeUnavailableError`（含 `retryable`）、`AuthRejectedError`、`SubscriptionFrozenError`（含 `renew_url`）、`RobotApiError`。`map_exchange_error()` 将 `tfrs_auth` 的异常映射为 theseus-kit 类型化错误 |
@@ -103,9 +104,9 @@ uv run poe ci && uv run poe build && uv run poe package-check
 TheseusSettings (env/.env)
   → build_credential() → tfrs_auth Credential
   → build_token_source() → AsyncCachingTokenSource (cache + refresh)
-  → RequestContext (validate X-TF-*)
-  → RobotAuth (httpx.Auth: Bearer + headers)
-  → RobotClient.get*(path)
+  → RobotAuth (httpx.Auth: Bearer only)
+  → RobotClient(base_url=access_url).get*(path)
+  → Operator gateway (Host + /c/tfrobot/{rid}) → TFRobotServer
   → robot HTTP response
 ```
 
@@ -126,7 +127,7 @@ TheseusSettings (env/.env)
 
 ## 测试约定
 
-- `tests/_fakeserver.py`：真实 TCP socket 的假服务器（stdlib `ThreadingHTTPServer`），合并 Manager 令牌端点 + 机器人 API。记录所有请求，强制校验 X-TF-* 头部契约（缺头返回 400）
+- `tests/_fakeserver.py`：真实 TCP socket 的假服务器（stdlib `ThreadingHTTPServer`），合并 Manager 令牌端点 + 机器人 API。记录所有请求，模拟网关：只接受 `/c/tfrobot/{rid}/...` 路径并要求 Bearer（缺失返回 401）
 - `tests/test_auth_routing.py`：真实 TCP 往返测试，不做传输层 mock。覆盖交换有线格式、头部注入、令牌缓存/刷新/单飞、端点故障映射、redaction
 - `tests/test_e2e_robot.py`：E2E 烟雾测试，通过 `THESEUS_E2E=1` 门控
 - 所有异步测试通过 `pytest-asyncio` + `asyncio_mode = "auto"` 运行
