@@ -614,6 +614,7 @@ class TestOAuthConfigDiscrimination:
             credential=dict(
                 kind="oauth",
                 authorization_server="https://auth.example.com",
+                robot_public_id="turingfocus:EMP010-R",
             ),
         )
         assert isinstance(settings.credential, OAuthConfig)
